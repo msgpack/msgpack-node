@@ -76,7 +76,7 @@ struct define<> {
 	template <typename Packer>
 	void msgpack_pack(Packer& pk) const
 	{
-		pk.pack_array(1);
+		pk.pack_array(0);
 	}
 	void msgpack_unpack(msgpack::object o)
 	{
