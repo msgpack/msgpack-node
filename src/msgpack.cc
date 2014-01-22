@@ -15,7 +15,7 @@ using namespace node;
 
 // MSC does not support C99 trunc function.
 #ifdef _MSC_BUILD
-double trunc(double d){ return (d>0) ? floor(d) : ceil(d) ; }
+#define trunc(d) ((d) > 0 ? floor(d) : ceil(d))
 #endif
 
 static Persistent<FunctionTemplate> msgpack_unpack_template;
@@ -53,17 +53,19 @@ static stack<msgpack_sbuffer *> sbuffers;
 
 #define DBG_PRINT_BUF(buf, name) \
     do { \
+        const size_t len = Buffer::Length(buf); \
+        const char * b = Buffer::Data(buf); \
         fprintf(stderr, "Buffer %s has %lu bytes:\n", \
-            (name), Buffer::Length(buf) \
+            (name), len \
         ); \
-        for (uint32_t i = 0; i * 16 < Buffer::Length(buf); i++) { \
+        for (size_t i = 0; i * 16 < len; i++) { \
             fprintf(stderr, "  "); \
-            for (uint32_t ii = 0; \
-                 ii < 16 && (i * 16) + ii < Buffer::Length(buf); \
+            for (size_t ii = 0; \
+                 ii < 16 && (i * 16) + ii < len; \
                  ii++) { \
                 fprintf(stderr, "%s%2.2hhx", \
                     (ii > 0 && (ii % 2 == 0)) ? " " : "", \
-                    Buffer::Data(buf)[i * 16 + ii] \
+                    b[i * 16 + ii] \
                 ); \
             } \
             fprintf(stderr, "\n"); \
@@ -121,7 +123,7 @@ v8_to_msgpack(Handle<Value> v8obj, msgpack_object *mo, msgpack_zone *mz, size_t 
         }
     } else if (v8obj->IsString()) {
         mo->type = MSGPACK_OBJECT_RAW;
-        mo->via.raw.size = static_cast<uint32_t>(DecodeBytes(v8obj, UTF8));
+        mo->via.raw.size = static_cast<size_t>(DecodeBytes(v8obj, UTF8));
         mo->via.raw.ptr = (char*) msgpack_zone_malloc(mz, mo->via.raw.size);
 
         DecodeWrite((char*) mo->via.raw.ptr, mo->via.raw.size, v8obj, UTF8);
@@ -131,32 +133,30 @@ v8_to_msgpack(Handle<Value> v8obj, msgpack_object *mo, msgpack_zone *mz, size_t 
         Handle<Function> func = Handle<Function>::Cast(date->Get(String::New("toISOString")));
         Handle<Value> argv[1] = {};
         Handle<Value> result = func->Call(date, 0, argv);
-        mo->via.raw.size = static_cast<uint32_t>(DecodeBytes(result, UTF8));
+        mo->via.raw.size = static_cast<size_t>(DecodeBytes(result, UTF8));
         mo->via.raw.ptr = (char*) msgpack_zone_malloc(mz, mo->via.raw.size);
 
         DecodeWrite((char*) mo->via.raw.ptr, mo->via.raw.size, result, UTF8);
     } else if (v8obj->IsArray()) {
         Local<Object> o = v8obj->ToObject();
         Local<Array> a = Local<Array>::Cast(o);
+        const size_t len = a->Length();
 
         mo->type = MSGPACK_OBJECT_ARRAY;
-        mo->via.array.size = a->Length();
+        mo->via.array.size = len;
         mo->via.array.ptr = (msgpack_object*) msgpack_zone_malloc(
             mz,
-            sizeof(msgpack_object) * mo->via.array.size
+            sizeof(msgpack_object) * len
         );
 
-        for (uint32_t i = 0; i < a->Length(); i++) {
+        for (size_t i = 0; i < len; i++) {
             Local<Value> v = a->Get(i);
             v8_to_msgpack(v, &mo->via.array.ptr[i], mz, depth);
         }
     } else if (Buffer::HasInstance(v8obj)) {
-        Local<Object> buf = v8obj->ToObject();
-
-
         mo->type = MSGPACK_OBJECT_RAW;
-        mo->via.raw.size = static_cast<uint32_t>(Buffer::Length(buf));
-        mo->via.raw.ptr = Buffer::Data(buf);
+        mo->via.raw.size = Buffer::Length(v8obj);
+        mo->via.raw.ptr = Buffer::Data(v8obj);
     } else {
         Local<Object> o = v8obj->ToObject();
 
@@ -168,15 +168,16 @@ v8_to_msgpack(Handle<Value> v8obj, msgpack_object *mo, msgpack_zone *mz, size_t 
         }
 
         Local<Array> a = o->GetPropertyNames();
+        const size_t len = a->Length();
 
         mo->type = MSGPACK_OBJECT_MAP;
-        mo->via.map.size = a->Length();
+        mo->via.map.size = len;
         mo->via.map.ptr = (msgpack_object_kv*) msgpack_zone_malloc(
             mz,
-            sizeof(msgpack_object_kv) * mo->via.map.size
+            sizeof(msgpack_object_kv) * len
         );
 
-        for (uint32_t i = 0; i < a->Length(); i++) {
+        for (size_t i = 0; i < len; i++) {
             Local<Value> k = a->Get(i);
 
             v8_to_msgpack(k, &mo->via.map.ptr[i].key, mz, depth);
@@ -215,10 +216,12 @@ msgpack_to_v8(msgpack_object *mo) {
         return Number::New(mo->via.dec);
 
     case MSGPACK_OBJECT_ARRAY: {
-        Local<Array> a = Array::New(mo->via.array.size);
+        const size_t n = mo->via.array.size;
+        Local<Array> a = Array::New(n);
 
-        for (uint32_t i = 0; i < mo->via.array.size; i++) {
-            a->Set(i, msgpack_to_v8(&mo->via.array.ptr[i]));
+        msgpack_object* p = mo->via.array.ptr;
+        for (size_t i = 0; i < n; i++) {
+            a->Set(i, msgpack_to_v8(p++));
         }
 
         return a;
@@ -228,13 +231,16 @@ msgpack_to_v8(msgpack_object *mo) {
         return String::New(mo->via.raw.ptr, mo->via.raw.size);
 
     case MSGPACK_OBJECT_MAP: {
+        const size_t n = mo->via.map.size;
         Local<Object> o = Object::New();
 
-        for (uint32_t i = 0; i < mo->via.map.size; i++) {
+        msgpack_object_kv* p = mo->via.map.ptr;
+        for (size_t i = 0; i < n; i++) {
             o->Set(
-                msgpack_to_v8(&mo->via.map.ptr[i].key),
-                msgpack_to_v8(&mo->via.map.ptr[i].val)
+                msgpack_to_v8(&p->key),
+                msgpack_to_v8(&p->val)
             );
+            p++;
         }
 
         return o;
@@ -270,7 +276,7 @@ pack(const Arguments &args) {
 
     msgpack_packer_init(&pk, sb, msgpack_sbuffer_write);
 
-    for (int i = 0; i < args.Length(); i++) {
+    for (int i = 0, n = args.Length(); i < n; i++) {
         msgpack_object mo;
 
         try {
@@ -307,19 +313,20 @@ unpack(const Arguments &args) {
             String::New("First argument must be a Buffer")));
     }
 
-    Local<Object> buf = args[0]->ToObject();
+    const char *buf = Buffer::Data(args[0]);
+    const size_t len = Buffer::Length(args[0]);
 
     MsgpackZone mz;
     msgpack_object mo;
     size_t off = 0;
 
-    switch (msgpack_unpack(Buffer::Data(buf), Buffer::Length(buf), &off, &mz._mz, &mo)) {
+    switch (msgpack_unpack(buf, len, &off, &mz._mz, &mo)) {
     case MSGPACK_UNPACK_EXTRA_BYTES:
     case MSGPACK_UNPACK_SUCCESS:
         try {
             msgpack_unpack_template->GetFunction()->Set(
                 msgpack_bytes_remaining_symbol,
-                Integer::New(static_cast<int32_t>(Buffer::Length(buf) - off))
+                Integer::New(len - off)
             );
             return scope.Close(msgpack_to_v8(&mo));
         } catch (MsgpackException e) {
