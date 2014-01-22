@@ -285,26 +285,9 @@ pack(const Arguments &args) {
         }
     }
 
-    v8::Local<Buffer> slowBuffer = node::Buffer::New(
-        sb->data, sb->alloc, _free_sbuf, (void *)sb
-    );
+    Buffer *buf = node::Buffer::New(sb->data, sb->size, _free_sbuf, (void *)sb);
 
-    // godsflaw: this part makes msgpack.pack() 1x slower than JSON.stringify()
-    // reaching back into JS appears to be expensive.
-    v8::Local<Object> global = v8::Context::GetCurrent()->Global();
-    v8::Local<Value> bv = global->Get(String::NewSymbol("Buffer"));
-
-    assert(bv->IsFunction());
-
-    Local<Function> bc = v8::Local<Function>::Cast(bv);
-    Handle<Value> cArgs[3] = {
-        slowBuffer->handle_,
-        v8::Integer::New(sb->size),
-        v8::Integer::New(0)
-    };
-    v8::Local<Object> fastBuffer = bc->NewInstance(3, cArgs);
-
-    return scope.Close(fastBuffer);
+    return scope.Close(buf->handle_);
 }
 
 // var o = msgpack.unpack(buf);
