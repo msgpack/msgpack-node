@@ -99,7 +99,7 @@ _free_sbuf(char *data, void *hint) {
 //
 // If a circular reference is detected, an exception is thrown.
 static void
-v8_to_msgpack(Handle<Value> v8obj, msgpack_object *mo, msgpack_zone *mz, size_t depth) {
+v8_to_msgpack(Local<Value> v8obj, msgpack_object *mo, msgpack_zone *mz, size_t depth) {
     if (512 < ++depth) {
         throw MsgpackException("Cowardly refusing to pack object with circular reference");
     }
@@ -132,7 +132,7 @@ v8_to_msgpack(Handle<Value> v8obj, msgpack_object *mo, msgpack_zone *mz, size_t 
         Handle<Date> date = Handle<Date>::Cast(v8obj);
         Handle<Function> func = Handle<Function>::Cast(date->Get(Nan::New<String>("toISOString").ToLocalChecked()));
         Handle<Value> argv[1] = {};
-        Handle<Value> result = func->Call(date, 0, argv);
+        Local<Value> result = func->Call(date, 0, argv);
         mo->via.str.size = static_cast<uint32_t>(Nan::DecodeBytes(result, Nan::Encoding::UTF8));
         mo->via.str.ptr = (char*) msgpack_zone_malloc(mz, mo->via.str.size);
 
