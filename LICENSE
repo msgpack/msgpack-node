@@ -31,7 +31,7 @@ The contents of the deps/ directory contain third-party dependencies which
 provided under different licenses. These dependencies and their associated
 licenses are as follows
 
-    . MessagePack, located in deps/msgpack/.
+    . MessagePack, located in deps/msgpack-c/.
     
-        This is licensed under the Apache 2 license. See deps/msgpack/LICENSE
-        and deps/msgpack/NOTICE for further information>
+        This is licensed under the Apache 2 license. See deps/msgpack-c/LICENSE
+        and deps/msgpack-c/NOTICE for further information>
