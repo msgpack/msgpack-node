@@ -141,6 +141,8 @@ You will need node-gyp:
 
 Then from the root of the msgpack repo, you can run:
 
+    git submodule init
+    git submodule update
     node-gyp rebuild
 
 <dl>
