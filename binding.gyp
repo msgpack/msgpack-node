@@ -6,11 +6,11 @@
                 'src/msgpack.cc',
             ],
             'include_dirs': [
-                'deps/msgpack',
-               '<!(node -e "require(\'nan\')")'
+                'deps/msgpack-c/include',
+                '<!(node -e "require(\'nan\')")'
             ],
             'dependencies': [
-                'deps/msgpack/msgpack.gyp:libmsgpack'
+                'deps/msgpack.gyp:libmsgpack'
             ],
             'cflags_cc': [
                     '-Wall',

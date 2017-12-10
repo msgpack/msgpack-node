@@ -2,14 +2,16 @@
 	"targets": [
 		{
 				'target_name': 'libmsgpack',
-				'include_dirs': [ '.' ],
+				'include_dirs': [
+					'msgpack-c/include'
+				],
 				'type': 'static_library',
 				'sources': [
-					'objectc.c',
-					'unpack.c',
-					'vrefbuffer.c',
-					'zone.c',
-					'version.c'					
+					'msgpack-c/src/objectc.c',
+					'msgpack-c/src/unpack.c',
+					'msgpack-c/src/vrefbuffer.c',
+					'msgpack-c/src/zone.c',
+					'msgpack-c/src/version.c'
 				],
 				'cflags_cc': [
 					'-Wall',
