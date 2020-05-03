@@ -129,7 +129,7 @@ There are two ways to install msgpack.
 
 ## NPM
 
-		npm install msgpack
+    npm install msgpack
 
 This should build and install msgpack for you. Then just `require('msgpack')`.
 
