@@ -15,7 +15,7 @@
             'cflags_cc': [
                     '-Wall',
                     '-O3',
-                    '-std=c++11',
+                    '-std=c++14',
                 ],
                 'cflags': [
                     '-Wall',
@@ -36,14 +36,14 @@
                             'xcode_settings': {
                                 'GCC_ENABLE_CPP_EXCEPTIONS': 'YES',
                                 'WARNING_CFLAGS': ['-Wall', '-Wno-unused-function'],
-                                'OTHER_CFLAGS': ['-std=c++11'],
+                                'OTHER_CFLAGS': ['-std=c++14'],
                             }
                         },
                         'Release': {
                             'xcode_settings': {
                                 'GCC_ENABLE_CPP_EXCEPTIONS': 'YES',
                                 'WARNING_CFLAGS': ['-Wall', '-Wno-unused-function'],
-                                'OTHER_CFLAGS': ['-std=c++11'],
+                                'OTHER_CFLAGS': ['-std=c++14'],
                             },
                         },
                     },
