@@ -1,204 +1,63 @@
-var fs      = require('fs'),
-    msgpack = require("../../lib/msgpack"),
-    stub    = require("../fixtures/stub");
-
-var DATA_TEMPLATE = {'abcdef' : 1, 'qqq' : 13, '19' : [1, 2, 3, 4]};
-var DATA = [];
-
-for (var i = 0; i < 1000000; i++) {
-    DATA.push(JSON.parse(JSON.stringify(DATA_TEMPLATE)));
-}
-
-function _set_up(callback) {
-  this.backup = {};
-  callback();
-}
-
-function _tear_down(callback) {
-  callback();
-}
-
-exports.benchmark = {
-  setUp : _set_up,
-  tearDown : _tear_down,
-  'JSON.stringify faster than msgpack.pack with array of 1m objects' : function (test) {
-    console.log();
-    var jsonStr;
-    var now = Date.now();
-    jsonStr = JSON.stringify(DATA);
-    var stringifyTime = (Date.now() - now);
-
-    var mpBuf;
-    now = Date.now();
-    mpBuf = msgpack.pack(DATA);
-    var packTime = (Date.now() - now);
-
-    console.log(
-      "msgpack.pack: "+packTime+"ms, JSON.stringify: "+stringifyTime+"ms"
-    );
-    console.log(
-      "ratio of JSON.stringify/msgpack.pack: " + stringifyTime/packTime
-    );
-    test.expect(1);
-    test.ok(
-      packTime > stringifyTime,
-      "msgpack.pack: "+packTime+"ms, JSON.stringify: "+stringifyTime+"ms"
-    );
-    test.done();
-  },
-//  'JSON.parse faster than msgpack.unpack with array of 1m objects' : function (test) {
-//    console.log();
-//    var jsonStr;
-//    jsonStr = JSON.stringify(DATA);
+#!/usr/bin/env node
+// Standalone throughput benchmark: JSON vs. msgpack on a small object.
 //
-//    var mpBuf;
-//    mpBuf = msgpack.pack(DATA);
+//     npm run bench
+//     node test/benchmark/benchmark.js
 //
-//    var now = Date.now();
-//    JSON.parse(jsonStr);
-//    var parseTime = (Date.now() - now);
-//
-//    now = Date.now();
-//    msgpack.unpack(mpBuf);
-//    var unpackTime = (Date.now() - now);
-//
-//    console.log(
-//      "msgpack.unpack: "+unpackTime+"ms, JSON.parse: "+parseTime+"ms"
-//    );
-//    console.log("ratio of parseTime/msgpack.unpack: " + parseTime/unpackTime);
-//    test.expect(1);
-//    test.ok(
-//      unpackTime > parseTime,
-//      "msgpack.unpack: "+unpackTime+"ms, JSON.parse: "+parseTime+"ms"
-//    );
-//    test.done();
-//  },
-  'JSON.stringify faster than msgpack.pack over 1m calls' : function (test) {
-    console.log();
+// This only measures. It does not assert that one encoder beats the other:
+// the ratio moves with the V8 version, the object shape, and the machine.
 
-    var jsonStr;
-    var now = Date.now();
-    DATA.forEach(function(d) {
-        jsonStr = JSON.stringify(d);
-    });
-    var stringifyTime = (Date.now() - now);
+'use strict';
 
-    var mpBuf;
-    now = Date.now();
-    DATA.forEach(function(d) {
-        mpBuf = msgpack.pack(d);
-    });
-    var packTime = (Date.now() - now);
+const os = require('os');
+const msgpack = require('../../lib/msgpack');
 
-    console.log(
-      "msgpack.pack: "+packTime+"ms, JSON.stringify: "+stringifyTime+"ms"
-    );
-    console.log(
-      "ratio of msgpack.pack/JSON.stringify: " + packTime/stringifyTime
-    );
-    test.expect(1);
-    test.ok(
-      stringifyTime < packTime && packTime/stringifyTime < 6,
-      "msgpack.pack: "+packTime+"ms, JSON.stringify: "+stringifyTime+"ms"
-    );
-    test.done();
-  },
-  'JSON.parse faster than msgpack.unpack over 1m calls' : function (test) {
-    console.log();
-    var jsonStr;
+const DATA = { abcdef: 1, qqq: 13, 19: [1, 2, 3, 4] };
+const ITERATIONS = 500000;
+const WARMUP = 50000;
 
-    DATA.forEach(function(d) {
-        jsonStr = JSON.stringify(d);
-    });
-
-    var mpBuf;
-    DATA.forEach(function(d) {
-        mpBuf = msgpack.pack(d);
-    });
-
-    var now = Date.now();
-    DATA.forEach(function(d) {
-        JSON.parse(jsonStr);
-    });
-    var parseTime = (Date.now() - now);
-
-    now = Date.now();
-    DATA.forEach(function(d) {
-        msgpack.unpack(mpBuf);
-    });
-    var unpackTime = (Date.now() - now);
-
-    console.log(
-      "msgpack.unpack: "+unpackTime+"ms, JSON.parse: "+parseTime+"ms"
-    );
-    console.log("ratio of JSON.parse/msgpack.unpack: " + unpackTime/parseTime);
-    test.expect(1);
-    test.ok(
-      parseTime < unpackTime && unpackTime/parseTime < 5,
-      "msgpack.unpack: "+unpackTime+"ms, JSON.parse: "+parseTime+"ms"
-    );
-    test.done();
-  },
-  'output above is from three runs on a 1m element array of objects' : function (test) {
-    console.log();
-    for (var i = 0; i < 3; i++) {
-      var mpBuf;
-      var now = Date.now();
-      mpBuf = msgpack.pack(DATA);
-      console.log('msgpack pack:   ' + (Date.now() - now) + ' ms');
-
-      now = Date.now();
-      msgpack.unpack(mpBuf);
-      console.log('msgpack unpack: ' + (Date.now() - now) + ' ms');
-
-      var jsonStr;
-      now = Date.now();
-      jsonStr = JSON.stringify(DATA);
-      console.log('json    pack:   ' + (Date.now() - now) + ' ms');
-
-      now = Date.now();
-      JSON.parse(jsonStr);
-      console.log('json    unpack: ' + (Date.now() - now) + ' ms');
-      console.log();
+function time(fn, count) {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < count; i++) {
+        fn();
     }
+    return Number(process.hrtime.bigint() - start) / 1e6;
+}
 
-    test.expect(1);
-    test.ok(1);
-    test.done();
-  },
-  'output above is from three runs of 1m individual calls' : function (test) {
-    console.log();
-    for (var i = 0; i < 3; i++) {
-      var mpBuf;
-      var now = Date.now();
-      DATA.forEach(function(d) {
-        mpBuf = msgpack.pack(d);
-      });
-      console.log('msgpack pack:   ' + (Date.now() - now) + ' ms');
+const CASES = [
+    ['JSON.stringify()', () => JSON.stringify(DATA)],
+    ['JSON.parse(JSON.stringify())', () => JSON.parse(JSON.stringify(DATA))],
+    ['msgpack.pack()', () => msgpack.pack(DATA)],
+    ['msgpack.unpack(msgpack.pack())', () => msgpack.unpack(msgpack.pack(DATA))]
+];
 
-      now = Date.now();
-      DATA.forEach(function(d) {
-        msgpack.unpack(mpBuf);
-      });
-      console.log('msgpack unpack: ' + (Date.now() - now) + ' ms');
+function cpuClass() {
+    const cpus = os.cpus();
+    const model = cpus.length > 0 ? cpus[0].model : 'unknown';
+    // Containers on some platforms report no model string; fall back to arch.
+    const name = !model || model === 'unknown' ? `${os.arch()} (model not reported)` : model;
+    return `${name} x ${cpus.length}, ${(os.totalmem() / 1024 ** 3).toFixed(1)} GiB RAM`;
+}
 
-      var jsonStr;
-      now = Date.now();
-      DATA.forEach(function(d) {
-        jsonStr = JSON.stringify(d);
-      });
-      console.log('json    pack:   ' + (Date.now() - now) + ' ms');
+console.log(`node       ${process.version}`);
+console.log(`v8         ${process.versions.v8}`);
+console.log(`platform   ${os.platform()} ${os.release()} (${os.arch()})`);
+console.log(`cpu        ${cpuClass()}`);
+console.log(`data       ${JSON.stringify(DATA)}`);
+console.log(`iterations ${ITERATIONS.toLocaleString('en-US')}`);
+console.log('');
 
-      now = Date.now();
-      DATA.forEach(function(d) {
-        JSON.parse(jsonStr);
-      });
-      console.log('json    unpack: ' + (Date.now() - now) + ' ms');
-      console.log();
-    }
+for (const [, fn] of CASES) {
+    time(fn, WARMUP);
+}
 
-    test.expect(1);
-    test.ok(1);
-    test.done();
-  }
-};
+for (const [name, fn] of CASES) {
+    const ms = time(fn, ITERATIONS);
+    console.log(
+        `${name.padEnd(32)} ${ms.toFixed(0).padStart(7)} ms  (${(ms / 1000).toFixed(2)} s)`
+    );
+}
+
+process.exit(0);
+
+// vim:ts=4 sw=4 et filetype=javascript

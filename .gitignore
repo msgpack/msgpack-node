@@ -9,3 +9,15 @@ deps/msgpack/.deps
 deps/msgpack/.libs
 test/packed-data
 node_modules
+*.node
+.DS_Store
+
+# Coverage output (never src/ or test/)
+coverage
+coverage.xml
+.nyc_output
+htmlcov
+*.gcda
+*.gcno
+*.gcov
+*.info

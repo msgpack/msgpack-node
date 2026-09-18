@@ -1,27 +1,36 @@
 #!/usr/bin/env node
 // Read JSON data from stdin and write MessagePack data to stdout.
 
-var msgpack = require('msgpack');
-var net = require('net');
+'use strict';
 
-var data = '';
+const msgpack = require('../lib/msgpack');
 
-var s = new net.Stream(0);
-s.addListener('data', function(d) {
-    data += d;
-});
-s.addListener('end', function() {
-    s = new net.Stream(1);
-    s.resume();
+const chunks = [];
 
-    if (s.write(msgpack.pack(JSON.parse(data)))) {
-        process.exit(0);
-    } else {
-        s.addListener('drain', function() {
-            process.exit(0);
-        });
+process.stdin.on('data', (d) => chunks.push(d));
+
+process.stdin.on('end', () => {
+    const text = Buffer.concat(chunks).toString('utf8');
+
+    let value;
+    try {
+        value = JSON.parse(text);
+    } catch (err) {
+        console.error('json2msgpack: invalid JSON on stdin: ' + err.message);
+        process.exitCode = 1;
+        return;
     }
+
+    let packed;
+    try {
+        packed = msgpack.pack(value);
+    } catch (err) {
+        console.error('json2msgpack: ' + err.message);
+        process.exitCode = 1;
+        return;
+    }
+
+    process.stdout.write(packed);
 });
-s.resume();
 
 // vim:ts=4 sw=4 et filetype=javascript

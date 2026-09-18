@@ -1,180 +1,183 @@
-`node-msgpack` is an addon for [NodeJS](http://nodejs.org) that provides an
-API for serializing and de-serializing JavaScript objects using the
-[MessagePack](http://msgpack.sourceforge.net) library. The performance of this
-addon compared to the native `JSON` object isn't too bad, and the space
-required for serialized data is far less than JSON.
+`node-msgpack` is an addon for [Node.js](https://nodejs.org) that serializes
+and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
+Packed output is a `Buffer` and is typically much smaller than JSON.
 
-### Performance
-
-`node-msgpack` is currently slower than the built-in `JSON.stringify()` and
-`JSON.parse()` methods.  In recent versions of node.js, the JSON functions
-have been heavily optimized.  node-msgpack is still more compact, and we are
-currently working performance improvements.  Testing shows that, over 500k
-iterations, `msgpack.pack()` is about 5x slower than `JSON.stringify()`, and
-`msgpack.unpack()` is about 3.5x slower than `JSON.parse()`.
-
-Old performance numbers are below.
-
-The following tests were performed with 500,000 instances of
-the JavaScript object `{'abcdef' : 1, 'qqq' : 13, '19' : [1, 2, 3, 4]}`:
-
-   * `JSON.stringify()` 7.17 seconds
-   * `JSON.parse(JSON.stringify())` 22.18 seconds
-   * `msgpack.pack()` 5.80 seconds
-   * `msgpack.unpack(msgpack.pack())` 8.62 seconds
-
-Note that `node-msgpack` produces and consumes Buffer objects, and a such does
-not incur encoding/decoding overhead when performing I/O with native strings.
+Version 2.0 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, and
+rejects oversized unpack headers instead of allocating them. See
+[`SECURITY.md`](SECURITY.md).
 
 ### Usage
 
-This module provides two methods: `pack()`, which consumes a JavaScript object
-and produces a node Buffer object; and `unpack()`, which consumes a node Buffer
-object and produces a JavaScript object. Packing of all native JavaScript types
-(undefined, boolean, numbers, strings, arrays and objects) is supported, as
-is the node Buffer type.
-
-The below code snippet packs and then unpacks a JavaScript object, verifying
-the resulting object at the end using `assert.deepEqual()`.
-
 ```javascript
-    var assert = require('assert');
-    var msgpack = require('msgpack');
+const assert = require('assert');
+const msgpack = require('msgpack');
 
-    var o = {"a" : 1, "b" : 2, "c" : [1, 2, 3]};
-    var b = msgpack.pack(o);
-    var oo = msgpack.unpack(b);
+const o = { a: 1, b: 2, c: [1, 2, 3] };
+const b = msgpack.pack(o);
+const oo = msgpack.unpack(b);
 
-    assert.deepEqual(oo, o);
+assert.deepEqual(oo, o);
 ```
 
-As a convenience, a higher level streaming API is provided in the
-`msgpack.Stream` class, which can be constructed around a `net.Stream`
-instance. This object emits `msg` events when an object has been received.
+`pack()` accepts any JSON-like value plus Node `Buffer`s and `Date`s.
+`unpack()` consumes a `Buffer` and returns a JavaScript value, or `null` if
+the buffer is a truncated (incomplete) MessagePack object. Oversized
+array/map/string bombs throw.
+
+A streaming helper wraps a readable socket and emits `msg`, plus `error` when
+a packet cannot be unpacked (the offending buffer is dropped):
 
 ```javascript
-    var msgpack = require('msgpack');
-
-    // ... get a net.Stream instance, s, from somewhere
-    
-    var ms = new msgpack.Stream(s);
-    ms.addListener('msg', function(m) {
-        sys.debug('received message: ' + sys.inspect(m));
-    });
+const msgpack = require('msgpack');
+const ms = new msgpack.Stream(socket);
+ms.on('msg', (m) => {
+  console.log('received', m);
+});
+ms.on('error', (e) => {
+  console.error('bad packet', e.message);
+});
+ms.send({ hello: 'world' });
 ```
 
-### Type Mapping
+### Type mapping (2.0)
 
-The JavaScript type system does not map cleanly on to the MsgPack type system,
-though it's pretty close.
+Packing:
 
-When packing, JavaScript values are mapped to MsgPack types as follows
+* `undefined` / `null` → nil
+* `boolean` → bool
+* finite integers → uint/int
+* other numbers → float64
+* `string` → str (UTF-8)
+* `Date` → str (ISO 8601, `toISOString()`), at any nesting level
+* `Buffer` → bin
+* `Array` → array
+* objects with a `toJSON()` method → whatever `toJSON()` returns, at any
+  nesting level
+* other objects → map of every own enumerable key; numeric keys are packed as
+  integer keys, not dropped
+* functions, circular refs, and nesting deeper than 512 throw
 
-   * `undefined` and `null` values map to `MSGPACK_OBJECT_NIL`
-   * `boolean` values map to `MSGPACK_OBJECT_BOOLEAN`
-   * `number` values map differently depending on their value
-      * Floating point values map to `MSGPACK_OBJECT_DOUBLE`
-      * Positive values map to `MSGPACK_OBJECT_POSITIVE_INTEGER`
-      * Negative values map to `MSGPACK_OBJECT_NEGATIVE_INTEGER`
-   * `string` values map to `MSGPACK_OBJECT_RAW`; all strings are serialized
-     with UTF-8 encoding
-   * Array values (as defined by `Array.isArray()`) map to
-     `MSGPACK_OBJECT_ARRAY`; each element in the array is packed individually
-     the rules in this list
-   * NodeJS Buffer values map to `MSGPACK_OBJECT_RAW`
-   * Everything else maps to `MSGPACK_OBJECT_MAP`, where we iterate over
-     the object's properties and pack them and their values as per the
-     mappings in this list
+Unpacking:
 
-When unpacking, MsgPack types are mapped to JavaScript values as follows
+* nil → `null`
+* bool / int / float → JS boolean / number
+* str → `string`
+* bin → `Buffer`
+* array / map → Array / Object
+* ext → throws
 
-   * `MSGPACK_OBJECT_NIL` values map to the `null` value
-   * `MSGPACK_OBJECT_BOOLEAN` values map to `boolean` values
-   * `MSGPACK_OBJECT_POSITIVE_INTEGER`, `MSGPACK_OBJECT_NEGATIVE_INTEGER` and
-     `MSGPACK_OBJECT_DOUBLE` values map to `number` values
-   * `MSGPACK_OBJECT_ARRAY` values map to arrays; each object in the array is
-      packed individually using the rules in this list
-   * `MSGPACK_OBJECT_RAW` values are mapped to `string` values; these values are
-      unpacked using either UTF-8 or ASCII encoding, depending on the contents
-      of the raw buffer
-   * `MSGPACK_OBJECT_MAP` values are mapped to JavaScript objects; keys and
-      values are unpacked individually using the rules in this list
+`unpack.bytes_remaining` is the number of unused trailing bytes after the last
+successful (or attempted) unpack. Stream uses that to splice leftover data.
 
-Strings are particularly problematic here, as it's difficult to get hints down
-into the packing and unpacking codepaths about how to interpret a particular
-string or `MSGPACK_OBJECT_RAW`. If you have strict requirements about the
-encoding of your strings, it's recommended that you populate a Buffer object
-yourself (e.g. using `Buffer.write()`) and pack that buffer rather than the
-string. This will ensure that you can control what gets packed.
+### Limits
 
-When unpacking, things are trickier as there is no way to know the encoding
-used when a string was packed. There is an [an open
-ticket](http://github.com/msgpack/msgpack/issues/issue/13) for the MsgPack
-format to address this.
+* array/map length ≤ 1,000,000
+* str/bin/ext length ≤ 32 MiB
+* nesting depth ≤ 512 on both pack and unpack
+
+The payload `dd ff 00 00 00` throws `msgpack unpack limit exceeded`. Packing a
+value nested deeper than 512 throws `Cowardly refusing to pack object nested
+more than 512 levels deep` instead of overflowing the C stack.
+
+### Building, installation, testing
+
+```
+npm install
+npm test
+npm run coverage
+```
+
+Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 18/20/22
+on Ubuntu and macOS. `npm run coverage` instruments JavaScript with c8 and the
+native addon with gcov, and fails under 95%. Gates and remaining uncovered
+lines are documented in [`COVERAGE.md`](COVERAGE.md).
 
 ### Command Line Utilities
 
-As a convenience and for debugging, `bin/json2msgpack` and `bin/msgpack2json`
-are provided to convert JSON data to and from MessagePack data, reading from
-stdin and writing to stdout.
+Two utilities convert between JSON and MessagePack on stdin/stdout:
+`bin/json2msgpack` reads JSON and writes MessagePack, and `bin/msgpack2json`
+reads MessagePack and writes JSON. Both are installed on `PATH` when the
+package is installed globally.
 
-    % echo '[1, 2, 3]' | ./bin/json2msgpack | xxd -
-    0000000: 9301 0203                                ....
-    % echo '[1, 2, 3]' | ./bin/json2msgpack | ./bin/msgpack2json 
-    [1,2,3]
+```
+echo '[1, 2, 3]' | ./bin/json2msgpack | xxd
+```
 
-### Building, Installation, Testing
+```
+00000000: 9301 0203                                ....
+```
 
-There are two ways to install msgpack.
+Piping the two together round-trips a value:
 
-## NPM
+```
+echo '[1, 2, 3]' | ./bin/json2msgpack | ./bin/msgpack2json
+```
 
-		npm install msgpack
+```
+[1,2,3]
+```
 
-This should build and install msgpack for you. Then just `require('msgpack')`.
+```
+echo '{"hello":"world"}' | bin/json2msgpack | bin/msgpack2json
+```
 
-## Manually
+```
+{"hello":"world"}
+```
 
-You will need node-gyp:
+`msgpack2json` prints one JSON value per line and consumes every complete
+message in its input. Both exit non-zero on invalid or truncated input.
 
-    npm install -g node-gyp
+### Benchmarks
 
-Then from the root of the msgpack repo, you can run:
+```
+npm run bench
+```
 
-    node-gyp rebuild
+or equivalently:
 
-<dl>
-  <dt>NOTE:</dt>
-  <dd>
-    node-gyp attempts to contact the Internet and download the target version
-    of node.js source and store it locally.  This will only happen once for
-    each time it sees a new node.js version.  If you're on a host with no
-    direct Internet access, you may need to shuffle this source over from
-    another box or sneaker net.  Good luck!
-  </dd>
-</dl>
+```
+node test/benchmark/benchmark.js
+```
 
-## Testing
+The benchmark serializes the object `{'abcdef': 1, 'qqq': 13, '19': [1, 2, 3, 4]}`
+500,000 times through four paths, after a warm-up pass. A representative run:
 
-To run all tests use:
+```
+node       v20.20.2
+v8         11.3.244.8-node.38
+platform   linux 6.12.76-linuxkit (arm64)
+cpu        arm64 (model not reported) x 8, 7.8 GiB RAM
+data       {"19":[1,2,3,4],"abcdef":1,"qqq":13}
+iterations 500,000
 
-    ./run_tests
+JSON.stringify()                     179 ms  (0.18 s)
+JSON.parse(JSON.stringify())         346 ms  (0.35 s)
+msgpack.pack()                      1021 ms  (1.02 s)
+msgpack.unpack(msgpack.pack())      1585 ms  (1.59 s)
+```
 
-To run a specific test:
+Measured on 2026-09-10: Node.js v20.20.2, Debian 12 (bookworm), Linux
+6.12.76-linuxkit aarch64 container (8 vCPUs, 7.8 GiB RAM). Numbers are for
+that machine and object shape only — re-run `npm run bench` on your own
+hardware before drawing conclusions.
 
-    ./run_tests test/lib/msgpack.js
+On small objects like this one, V8's native JSON codec is faster than crossing
+the JS/C++ boundary per call; msgpack's advantage is payload size (20 bytes here
+versus 36 for the JSON text) and its ability to carry binary data without
+base64. Large `Buffer` payloads and batched (single-call) packing shift the
+comparison considerably.
 
-<dl>
-  <dt>NOTE:</dt>
-  <dd>
-    Tests are based on a modified version of
-    nodeunit (https://github.com/godsflaw/nodeunit).
-    Follow ./run_tests instructions if you run into problems.
-  </dd>
-</dl>
+### License
 
-## Benchmarks
+This addon is **BSD-3-Clause** (Copyright (c) 2010, Peter Griess); see
+[`LICENSE`](LICENSE).
 
-To run benchmarks:
+The vendored MessagePack C library in `deps/msgpack/` is **Boost Software
+License 1.0**, as shipped by msgpack-c c-7.0.2; see `deps/msgpack/LICENSE`.
+msgpack-c was Apache-2.0 through 1.2.x and relicensed to BSL-1.0 in release
+1.3.0 (2015-11-21), so the Boost text is the correct license for these files:
 
-    ./run_tests test/benchmark/benchmark.js
+* relicensing discussion: <https://github.com/msgpack/msgpack-c/issues/366>
+* msgpack-c `CHANGELOG.md`, 1.3.0: "Change license from Apache 2.0 to Boost
+  Software License, Version 1.0 (#386)"

@@ -1,83 +1,53 @@
 {
-	"name": "msgpack",
-	"description": "A space-efficient object serialization library for node.js",
-	"version": "1.0.3",
-	"homepage": "https://github.com/msgpack/msgpack-node",
-	"contributors": [
-		{
-			"name": "Amos Barreto",
-			"url": "https://github.com/squamos"
-		},
-		{
-			"name": "Peter Griess",
-			"url": "https://github.com/pgriess",
-			"email": "pg@std.in"
-		},
-		{
-			"name": "Maxwell Krohn",
-			"url": "https://github.com/maxtaco"
-		},
-		{
-			"name": "Jaye Marshall",
-			"url": "https://github.com/jmars"
-		},
-		{
-			"name": "matthiasg",
-			"url": "https://github.com/matthiasg"
-		},
-		{
-			"name": "Christopher Mooney",
-			"url": "https://github.com/godsflaw",
-			"email": "chris@dod.net"
-		},
-		{
-			"name": "Michael Phan-Ba",
-			"url": "https://github.com/mikepb"
-		},
-		{
-			"name": "Bob Potter",
-			"url": "https://github.com/bpot"
-		},
-		{
-			"name": "rashfael",
-			"url": "https://github.com/rashfael"
-		},
-		{
-			"name": "Tom Taylor",
-			"email": "tom@tomtaylor.co.uk",
-			"url": "https://github.com/tomtaylor"
-		},
-		{
-			"name": "Brian White",
-			"url": "https://github.com/mscdex"
-		},
-		{
-			"name": "Keiji Yoshimi",
-			"url": "https://github.com/walf443"
-		}
-	],
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/msgpack/msgpack-node.git"
-	},
-	"main": "./lib/msgpack",
-	"directories": {
-		"lib": "lib"
-	},
-	"dependencies": {
-		"nan": "^2.14.0"
-	},
-	"devDependencies": {
-		"nodeunit": "https://github.com/godsflaw/nodeunit/archive/master.tar.gz"
-	},
-	"engines": {
-		"node": ">=0.12.7"
-	},
-	"bin": {
-		"json2msgpack": "./bin/json2msgpack",
-		"msgpack2json": "./bin/msgpack2json"
-	},
-	"scripts": {
-		"test": "./run_tests"
-	}
+  "name": "msgpack",
+  "description": "A space-efficient object serialization library for Node.js",
+  "version": "2.0.0",
+  "homepage": "https://github.com/msgpack/msgpack-node",
+  "author": "Peter Griess <pg@std.in>",
+  "contributors": [
+    { "name": "Amos Barreto", "url": "https://github.com/squamos" },
+    { "name": "Peter Griess", "url": "https://github.com/pgriess", "email": "pg@std.in" },
+    { "name": "Maxwell Krohn", "url": "https://github.com/maxtaco" },
+    { "name": "Jaye Marshall", "url": "https://github.com/jmars" },
+    { "name": "matthiasg", "url": "https://github.com/matthiasg" },
+    { "name": "Christopher Mooney", "url": "https://github.com/godsflaw", "email": "chris@dod.net" },
+    { "name": "Michael Phan-Ba", "url": "https://github.com/mikepb" },
+    { "name": "Bob Potter", "url": "https://github.com/bpot" },
+    { "name": "rashfael", "url": "https://github.com/rashfael" },
+    { "name": "Tom Taylor", "email": "tom@tomtaylor.co.uk", "url": "https://github.com/tomtaylor" },
+    { "name": "Brian White", "url": "https://github.com/mscdex" },
+    { "name": "Keiji Yoshimi", "url": "https://github.com/walf443" }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/msgpack/msgpack-node.git"
+  },
+  "main": "./lib/msgpack",
+  "types": "index.d.ts",
+  "directories": {
+    "lib": "lib"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "nan": "^2.23.1"
+  },
+  "scripts": {
+    "test": "node --test test/cli.test.js test/coverage-native.test.js test/msgpack.test.js test/regression.test.js test/security.test.js test/worker.test.js",
+    "bench": "node test/benchmark/benchmark.js",
+    "rebuild": "node-gyp rebuild",
+    "coverage": "npm run coverage:js && npm run coverage:native",
+    "coverage:js": "c8 --include=lib --include=bin --extension=.js --extension= --all --check-coverage --statements 95 --branches 95 --functions 95 --lines 95 --reporter=text --reporter=lcov node --test test/*.test.js",
+    "coverage:native": "node scripts/coverage-native.js"
+  },
+  "bin": {
+    "json2msgpack": "./bin/json2msgpack",
+    "msgpack2json": "./bin/msgpack2json"
+  },
+  "gypfile": true,
+  "license": "BSD-3-Clause",
+  "devDependencies": {
+    "c8": "^12.0.0"
+  }
 }

@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-2022 ships VS 2022. windows-latest currently has VS 2026
+        # (18.x), which node-gyp 10/11 bundled with Node 18/20/22 reports as
+        # unknown version "undefined" and then fails the native rebuild.
+        os: [ubuntu-latest, macos-latest, windows-2022]
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install and test
+        # bash so `&&` is a hard stop on Windows too (PowerShell would still
+        # run npm test after a failed rebuild).
+        shell: bash
+        run: npm install && npm test
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install gcovr
+        run: |
+          gcovr --version || pip install --upgrade gcovr
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
+      # Fails the job when JS or native coverage drops below 95%.
+      - name: Coverage
+        run: npm run coverage

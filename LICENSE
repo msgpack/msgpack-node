@@ -31,7 +31,22 @@ The contents of the deps/ directory contain third-party dependencies which
 provided under different licenses. These dependencies and their associated
 licenses are as follows
 
-    . MessagePack, located in deps/msgpack/.
-    
-        This is licensed under the Apache 2 license. See deps/msgpack/LICENSE
-        and deps/msgpack/NOTICE for further information>
+    . MessagePack C library, located in deps/msgpack/.
+
+        Vendored from msgpack-c c-7.0.2
+        (https://github.com/msgpack/msgpack-c), licensed under the Boost
+        Software License 1.0. The full text as shipped upstream is in
+        deps/msgpack/LICENSE, and the per-file headers in deps/msgpack/
+        carry the same Boost notice.
+
+        On the license history, since older copies of these sources carry
+        Apache-2.0 headers: msgpack-c was licensed under Apache License 2.0
+        through the 1.2.x series and relicensed to the Boost Software
+        License 1.0 in release 1.3.0 (2015-11-21). Boost is therefore the
+        correct license for the c-7.0.2 files vendored here, and the Apache
+        text must not be reapplied to them.
+
+            - relicensing discussion:
+              https://github.com/msgpack/msgpack-c/issues/366
+            - msgpack-c CHANGELOG.md, 1.3.0: "Change license from Apache 2.0
+              to Boost Software License, Version 1.0 (#386)"

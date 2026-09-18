@@ -1,0 +1,7 @@
+msgpack-c c-7.0.2
+git: https://github.com/msgpack/msgpack-c
+tag: c-7.0.2
+commit: e17beb371b59459a13b48e166a11e123bda5bf93
+license: Boost Software License 1.0
+notes: C library only. sysdep.h and pack_template.h generated for little-endian.
+       unpack.c array/map callbacks cap n at MSGPACK_NODE_MAX_CONTAINER (1e6).
