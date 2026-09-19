@@ -43,7 +43,7 @@ struct PackHint {
         has_interpret(false) {}
 };
 
-static void ThrowCannotPackAs(const char* what) {
+[[noreturn]] static void ThrowCannotPackAs(const char* what) {
   char buf[80];
   std::snprintf(buf, sizeof(buf), "cannot pack value as %s", what);
   throw MsgpackException(Error(buf));
@@ -72,7 +72,11 @@ static const char* PackTypeName(PackType t) {
     case kTypeNil: return "nil";
     case kTypeTrue: return "true";
     case kTypeFalse: return "false";
-    default: return "type";
+    /* GCOVR_EXCL_START: kTypeNone is not a named type */
+    case kTypeNone:
+    default:
+      return "type";
+    /* GCOVR_EXCL_STOP */
   }
 }
 
@@ -81,11 +85,16 @@ static int WriteRaw(msgpack_packer* pk, const void* buf, size_t n) {
 }
 
 static bool IsPackOptionsObject(v8::Local<v8::Value> v) {
-  if (v.IsEmpty() || !v->IsObject() || v->IsArray() || v->IsDate() ||
-      v->IsFunction() || v->IsRegExp() || v->IsNativeError() ||
-      v->IsPromise() || v->IsTypedArray() || v->IsArrayBuffer() ||
-      v->IsSharedArrayBuffer() || v->IsDataView() ||
-      node::Buffer::HasInstance(v)) {
+  /* Buffer is a Uint8Array in Node 18+, so IsTypedArray already rejects it. */
+  /* GCOVR_EXCL_START: Length==2 implies info[1] is set */
+  if (v.IsEmpty()) {
+    return false;
+  }
+  /* GCOVR_EXCL_STOP */
+  if (!v->IsObject() || v->IsArray() || v->IsDate() || v->IsFunction() ||
+      v->IsRegExp() || v->IsNativeError() || v->IsPromise() ||
+      v->IsTypedArray() || v->IsArrayBuffer() || v->IsSharedArrayBuffer() ||
+      v->IsDataView()) {
     return false;
   }
   v8::Local<v8::Object> obj = v.As<v8::Object>();
@@ -93,7 +102,8 @@ static bool IsPackOptionsObject(v8::Local<v8::Value> v) {
   v8::MaybeLocal<v8::Array> maybe_names = obj->GetOwnPropertyNames(
       Nan::GetCurrentContext(), v8::PropertyFilter::ONLY_ENUMERABLE);
   if (maybe_names.IsEmpty() || try_catch.HasCaught()) {
-    try_catch.Reset();
+    /* Empty Maybe and a pending exception arrive together from V8. */
+    try_catch.Reset();  /* GCOVR_EXCL_BR_LINE */
     return false;
   }
   v8::Local<v8::Array> names = maybe_names.ToLocalChecked();
@@ -305,8 +315,10 @@ static void PackStrBytes(msgpack_packer* pk, PackType t, const char* data,
       hdr[4] = static_cast<unsigned char>(len);
       hn = 5;
       break;
+    /* GCOVR_EXCL_START: only str types are passed */
     default:
       ThrowCannotPackAs("str");
+    /* GCOVR_EXCL_STOP */
   }
   rc = WriteRaw(pk, hdr, hn);
   if (rc == 0) {  /* GCOVR_EXCL_BR_LINE */
@@ -357,8 +369,10 @@ static void PackBinBytes(msgpack_packer* pk, PackType t, const char* data,
       hdr[4] = static_cast<unsigned char>(len);
       hn = 5;
       break;
+    /* GCOVR_EXCL_START: only bin types are passed */
     default:
       ThrowCannotPackAs("bin");
+    /* GCOVR_EXCL_STOP */
   }
   rc = WriteRaw(pk, hdr, hn);
   if (rc == 0) {  /* GCOVR_EXCL_BR_LINE */
@@ -501,8 +515,10 @@ static void PackAsType(msgpack_packer* pk, v8::Local<v8::Value> o,
       }
       rc = msgpack_pack_false(pk);
       break;
-    default:
+    /* GCOVR_EXCL_START: PackAsType is not called with kTypeNone */
+    case kTypeNone:
       ThrowCannotPackAs("type");
+    /* GCOVR_EXCL_STOP */
   }
   if (rc != 0) {  /* GCOVR_EXCL_BR_LINE: sbuffer write failure */
     throw MsgpackException(Error("Error serializing object"));
@@ -546,8 +562,10 @@ static void PackAsFamily(msgpack_packer* pk, v8::Local<v8::Value> o,
     case kFamilyBin:
       GetBinBytes(o, kTypeNone, pk);
       return;
-    default:
+    /* GCOVR_EXCL_START: PackAsFamily is not called with kFamilyNone */
+    case kFamilyNone:
       ThrowCannotPackAs("family");
+    /* GCOVR_EXCL_STOP */
   }
   if (rc != 0) {  /* GCOVR_EXCL_BR_LINE: sbuffer write failure */
     throw MsgpackException(Error("Error serializing object"));
@@ -559,9 +577,10 @@ static void JsToMsgpackHinted(msgpack_packer* pk, v8::Local<v8::Value> o,
 
 static void PackArrayInterpreted(msgpack_packer* pk, v8::Local<v8::Array> arr,
                                  int depth, const PackHint& hint) {
-  if (IsMarked(arr)) {
+  /* Nested interpret is not applied (FillHintFromObject(..., false)). */
+  if (IsMarked(arr)) {  /* GCOVR_EXCL_START */
     throw MsgpackException(Error("Cowardly refusing to pack circular reference"));
-  }
+  }  /* GCOVR_EXCL_STOP */
   Mark(arr);
   try {
     /* GCOVR_EXCL_BR_START: allocation failure only. */
@@ -571,8 +590,8 @@ static void PackArrayInterpreted(msgpack_packer* pk, v8::Local<v8::Array> arr,
     /* GCOVR_EXCL_BR_STOP */
     for (uint32_t i = 0; i < arr->Length(); i++) {
       v8::Local<v8::Value> item = CheckedGet(arr, i);
-      v8::Local<v8::Object> recv =
-          hint.recv.IsEmpty() ? Nan::New<v8::Object>() : hint.recv;
+      /* interpret always sets recv in FillHintFromObject. */
+      v8::Local<v8::Object> recv = hint.recv;
       v8::Local<v8::Value> ret = CallOneArg(recv, hint.interpret, item);
       if (!ret->IsObject() || ret->IsArray() || ret->IsDate() ||
           ret->IsFunction() || node::Buffer::HasInstance(ret)) {
@@ -598,10 +617,13 @@ static void PackArrayInterpreted(msgpack_packer* pk, v8::Local<v8::Array> arr,
 static void JsToMsgpackHinted(msgpack_packer* pk, v8::Local<v8::Value> o,
                               int depth, const PackHint& hint) {
   if (o->IsArray() && hint.has_interpret) {
+    /* Hinted pack starts at depth 0 and interpret does not recurse. */
+    /* GCOVR_EXCL_START */
     if (kMaxPackDepth < depth + 1) {
       throw MsgpackException(
           Error("Cowardly refusing to pack object nested more than 512 levels deep"));
     }
+    /* GCOVR_EXCL_STOP */
     PackArrayInterpreted(pk, o.As<v8::Array>(), depth + 1, hint);
     return;
   }

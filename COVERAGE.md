@@ -8,9 +8,9 @@
 | `lib/` + `bin/` (c8) | branches | **100%** | ≥ 95% |
 | `lib/` + `bin/` (c8) | functions | **100%** | ≥ 95% |
 | `lib/` + `bin/` (c8) | lines | **100%** | ≥ 95% |
-| `src/msgpack.cc` (gcovr) | lines | **95.9%** (473/493) | ≥ 95% |
-| `src/msgpack.cc` (gcovr) | branches | **99.5%** (400/402) | ≥ 95% |
-| `src/msgpack.cc` (gcovr) | functions | 100% (36/36) | — |
+| `src/` (gcovr) | lines | **95.2%** (902/947) | ≥ 95% |
+| `src/` (gcovr) | branches | **95.4%** (836/876) | ≥ 95% |
+| `src/` (gcovr) | functions | 100% (59/59) | — |
 
 `deps/` is excluded from the native report; the vendored msgpack-c is not our
 code. `build/` is rebuilt without instrumentation at the end of
@@ -56,12 +56,12 @@ Every one is an error arm that cannot be entered from JS without stubbing
 | 735 | `throw` after `msgpack_pack_array` in `Pack` | Allocation failure only. |
 | 809–813, 815 | `MSGPACK_UNPACK_CONTINUE` / parse-error tail of `Unpack` | `ScanOne` walks the same grammar first with limits at or below the vendored library's own (511 vs 512 nested containers, the same 1 000 000 element cap), so once it returns `kScanOk`, `msgpack_unpack_next` can only succeed. The arms stay so a future divergence fails closed instead of reading `result.data` uninitialised. |
 
-## Remaining uncovered native branches (2 of 402)
+## Remaining uncovered native branches in `msgpack.cc` (2)
 
 | Line | Code | Why |
 | --- | --- | --- |
-| 148 | `switch (b)` in `ScanOne` | The `default:` edge — see lines 307–308 above. It cannot be excluded on its own without also dropping the 30 covered case edges on the same line, so it is left in and counted against us. |
-| 575 | `switch (mo->type)` in `MsgpackToJs` | Same, for the `default:` edge covering the complete `msgpack_object_type` enum. |
+| 154 | `switch (b)` in `ScanOne` | The `default:` edge — see lines 307–308 above. It cannot be excluded on its own without also dropping the 30 covered case edges on the same line, so it is left in and counted against us. |
+| 611 | `switch (mo->type)` in `MsgpackToJs` | Same, for the `default:` edge covering the complete `msgpack_object_type` enum. |
 
 ## About the native branch number
 
@@ -139,6 +139,13 @@ gcovr --root . --filter src/ --exclude deps/ --no-markers --txt-metric branch --
   failure modes and mark cleanup; and a worker that nests 600 packs deep to
   saturate the thread-local sbuffer pool and reach the "pool is full, free it"
   arm of `~PackBuffer`.
+- `test/pack-hints.test.js` — `pack(value, { type, family, interpret })` wire
+  types, last-arg options detection (host objects, Proxies, ownKeys throws),
+  and the reachable miss paths in `src/pack_hints.inc`. Unreachable arms
+  (empty `info[1]`, `kTypeNone` / `kFamilyNone` defaults, hinted
+  `kMaxPackDepth`) are marked `GCOVR_EXCL_*`, not deleted. Native overall
+  stays above the 95% gate (`pack_hints.inc` itself is 91% branches because
+  switch `default:` edges sit on the same line as covered cases).
 - `test/cli.test.js` (12 tests) — the exit-1 paths of both CLIs: invalid JSON,
   empty stdin, a pack rejection reachable from real JSON, an unparseable byte,
   an oversized header, incomplete input both alone and after a good frame, and
