@@ -1,4 +1,4 @@
-// Type definitions for msgpack 3.2.0
+// Type definitions for msgpack 3.3.0
 // Project: https://github.com/msgpack/msgpack-node
 
 /// <reference types="node" />
@@ -96,8 +96,11 @@ export namespace unpack {
 /**
  * Frames MessagePack messages over a stream.
  *
- * Emits `'msg'` with each decoded value, and `'error'` if a packet cannot be
- * decoded (the buffered data is then dropped).
+ * Emits `'msg'` with each decoded value, `'drain'` when the underlying
+ * writable is ready for more data and the send queue is empty, and
+ * `'error'` if a packet cannot be decoded (the buffered data is then
+ * dropped) or if queued sends are discarded because the underlying stream
+ * emitted `error`/`close`/`end`.
  */
 export class Stream extends EventEmitter {
     constructor(s: NodeJS.ReadWriteStream);
@@ -107,7 +110,13 @@ export class Stream extends EventEmitter {
 
     /**
      * Pack `m` and write it to the underlying stream. Extra arguments are
-     * forwarded to `stream.write()` (encoding, callback).
+     * forwarded to `stream.write()` (encoding, callback) on an immediate
+     * write. Returns the boolean from `write()`, or `false` if the message
+     * was queued because a previous write returned false and `drain` has
+     * not fired yet. At most 1024 messages may wait in that queue; further
+     * `send()` throws. Queued flushes call `write(buf)` without inventing
+     * an encoding; a supplied callback runs after that buffer is written
+     * or if the queue is dropped.
      */
     send(m: any, ...args: any[]): boolean;
 }

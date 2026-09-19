@@ -2,10 +2,11 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 3.2 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, unpacks
+Version 3.3 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, unpacks
 64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`, accepts
-optional pack type/family hints, and can unpack maps and arrays lazily
-(`unpack(buf, { lazy: true })`). See [`SECURITY.md`](SECURITY.md).
+optional pack type/family hints, can unpack maps and arrays lazily
+(`unpack(buf, { lazy: true })`), and applies write backpressure on
+`Stream.send`. See [`SECURITY.md`](SECURITY.md).
 
 ### Usage
 
@@ -26,7 +27,14 @@ and returns a JavaScript value, or `null` if the buffer is a truncated
 (incomplete) MessagePack object. Oversized array/map/string bombs throw.
 
 A streaming helper wraps a readable socket and emits `msg`, plus `error` when
-a packet cannot be unpacked (the offending buffer is dropped):
+a packet cannot be unpacked (the offending buffer is dropped). `send()` packs
+and writes; it returns the boolean from the underlying `write()`, or `false`
+if the message was queued because a previous write returned `false` and
+`drain` has not fired yet. `drain` is re-emitted from the underlying
+writable onto the Stream. At most **1024** messages may wait in that queue;
+a further `send()` throws. Extra `write` arguments (encoding, callback) are
+forwarded on an immediate write. On underlying `error` / `close` / `end`,
+queued messages are dropped and Stream emits `error` if any were unsent:
 
 ```javascript
 const msgpack = require('msgpack');
@@ -36,6 +44,9 @@ ms.on('msg', (m) => {
 });
 ms.on('error', (e) => {
   console.error('bad packet', e.message);
+});
+ms.on('drain', () => {
+  /* underlying writable is ready for more send() calls */
 });
 ms.send({ hello: 'world' });
 ```

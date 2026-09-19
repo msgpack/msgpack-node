@@ -126,6 +126,25 @@ describe('msgpack pack/unpack', () => {
   });
 });
 
+function mockWritable(returnSeq) {
+  const s = new EventEmitter();
+  const seq = returnSeq ? returnSeq.slice() : [];
+  s.writes = [];
+  s.write = function (chunk) {
+    s.writes.push({
+      chunk: chunk,
+      extra: Array.prototype.slice.call(arguments, 1),
+    });
+    const last = arguments[arguments.length - 1];
+    const ret = seq.length > 0 ? seq.shift() : true;
+    if (typeof last === 'function') {
+      last();
+    }
+    return ret;
+  };
+  return s;
+}
+
 describe('msgpack.Stream', () => {
   it('sends a packed message through write', () => {
     const s = new EventEmitter();
@@ -148,6 +167,206 @@ describe('msgpack.Stream', () => {
     assert.equal(s.write.args.length, 4);
     assert.deepEqual(msgpack.unpack(s.write.args[0]), 'hello');
     assert.deepEqual(Array.prototype.slice.call(s.write.args, 1), [1, 2, 3]);
+  });
+
+  it('returns true when write returns true and does not queue', () => {
+    const s = mockWritable([true]);
+    const ms = new msgpack.Stream(s);
+    assert.equal(ms.send('hello'), true);
+    assert.equal(s.writes.length, 1);
+    assert.deepEqual(msgpack.unpack(s.writes[0].chunk), 'hello');
+    assert.equal(ms.send('again'), true);
+    assert.equal(s.writes.length, 2);
+  });
+
+  it('queues send after write returns false and flushes FIFO on drain', () => {
+    const s = mockWritable([false, true]);
+    const ms = new msgpack.Stream(s);
+    const drained = [];
+    ms.on('drain', () => drained.push(true));
+
+    assert.equal(ms.send('one'), false);
+    assert.equal(s.writes.length, 1);
+    assert.equal(ms.send('two'), false);
+    assert.equal(ms.send('three'), false);
+    assert.equal(s.writes.length, 1);
+
+    s.emit('drain');
+
+    assert.equal(s.writes.length, 3);
+    assert.deepEqual(
+      s.writes.map((w) => msgpack.unpack(w.chunk)),
+      ['one', 'two', 'three']
+    );
+    assert.equal(drained.length, 1);
+  });
+
+  it('re-emits drain when the underlying writable drains with an empty queue', () => {
+    const s = mockWritable([false]);
+    const ms = new msgpack.Stream(s);
+    let got = 0;
+    ms.on('drain', () => {
+      got += 1;
+    });
+    assert.equal(ms.send('x'), false);
+    s.emit('drain');
+    assert.equal(got, 1);
+    assert.equal(s.writes.length, 1);
+  });
+
+  it('throws when more than 1024 messages are queued', () => {
+    const s = mockWritable();
+    s.writes = [];
+    s.write = function (chunk) {
+      s.writes.push({ chunk: chunk, extra: [] });
+      return false;
+    };
+    const ms = new msgpack.Stream(s);
+    assert.equal(ms.send('head'), false);
+    for (let i = 0; i < 1024; i++) {
+      assert.equal(ms.send(i), false);
+    }
+    assert.equal(s.writes.length, 1);
+    assert.throws(() => ms.send('overflow'), /backpressure|queue full/);
+  });
+
+  it('runs the extra callback argument on send', () => {
+    const s = mockWritable([true]);
+    const ms = new msgpack.Stream(s);
+    let n = 0;
+    assert.equal(
+      ms.send('hello', () => {
+        n += 1;
+      }),
+      true
+    );
+    assert.equal(n, 1);
+  });
+
+  it('runs the callback of a queued send after that buffer is written', () => {
+    const s = mockWritable([false, true]);
+    const ms = new msgpack.Stream(s);
+    let n = 0;
+    assert.equal(ms.send('one'), false);
+    assert.equal(
+      ms.send('two', () => {
+        n += 1;
+      }),
+      false
+    );
+    assert.equal(n, 0);
+    s.emit('drain');
+    assert.equal(n, 1);
+    assert.deepEqual(
+      s.writes.map((w) => msgpack.unpack(w.chunk)),
+      ['one', 'two']
+    );
+    assert.equal(s.writes[1].extra.length, 1);
+    assert.equal(typeof s.writes[1].extra[0], 'function');
+  });
+
+  it('does not pass encoding to a queued flush write', () => {
+    const s = mockWritable([false, true]);
+    const ms = new msgpack.Stream(s);
+    ms.send('one');
+    ms.send('two', 'utf8');
+    s.emit('drain');
+    assert.equal(s.writes[1].extra.length, 0);
+    assert.deepEqual(msgpack.unpack(s.writes[1].chunk), 'two');
+  });
+
+  it('stops a flush when write returns false again', () => {
+    const s = mockWritable([false, false, true]);
+    const ms = new msgpack.Stream(s);
+    ms.send('a');
+    ms.send('b');
+    ms.send('c');
+    s.emit('drain');
+    assert.equal(s.writes.length, 2);
+    s.emit('drain');
+    assert.equal(s.writes.length, 3);
+    assert.deepEqual(
+      s.writes.map((w) => msgpack.unpack(w.chunk)),
+      ['a', 'b', 'c']
+    );
+  });
+
+  it('does not spin if write emits drain synchronously during flush', () => {
+    const s = new EventEmitter();
+    let n = 0;
+    s.write = function () {
+      n += 1;
+      if (n === 1) {
+        return false;
+      }
+      s.emit('drain');
+      return true;
+    };
+    const ms = new msgpack.Stream(s);
+    ms.send('a');
+    ms.send('b');
+    ms.send('c');
+    s.emit('drain');
+    assert.equal(n, 3);
+  });
+
+  it('emits error and drops the queue on close with pending sends', () => {
+    const s = mockWritable([false]);
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.on('error', (e) => errors.push(e));
+    ms.send('one');
+    ms.send('two');
+    s.emit('close');
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /unsent|backpressure/);
+    s.emit('drain');
+    assert.equal(s.writes.length, 1);
+  });
+
+  it('does not emit error on close when the queue is empty', () => {
+    const s = mockWritable([true]);
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.on('error', (e) => errors.push(e));
+    ms.send('one');
+    s.emit('close');
+    s.emit('end');
+    s.emit('error', new Error('socket'));
+    assert.equal(errors.length, 0);
+  });
+
+  it('drops the queue on underlying error and end', () => {
+    const s = mockWritable([false]);
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.on('error', (e) => errors.push(e));
+    ms.send('a');
+    ms.send('b');
+    s.emit('error', new Error('socket'));
+    assert.equal(errors.length, 1);
+
+    const s2 = mockWritable([false]);
+    const ms2 = new msgpack.Stream(s2);
+    const errors2 = [];
+    ms2.on('error', (e) => errors2.push(e));
+    ms2.send('a');
+    ms2.send('b');
+    s2.emit('end');
+    assert.equal(errors2.length, 1);
+  });
+
+  it('invokes queued callbacks when the queue is dropped', (t, done) => {
+    const s = mockWritable([false]);
+    const ms = new msgpack.Stream(s);
+    ms.on('error', () => {});
+    ms.send('one');
+    ms.send('two', (err) => {
+      assert.ok(err);
+      assert.match(err.message, /unsent|backpressure/);
+      done();
+    });
+    s.emit('close');
   });
 
   it('emits msg for a complete packet', () => {
