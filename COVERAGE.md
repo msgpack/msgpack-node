@@ -1,4 +1,4 @@
-# Coverage — msgpack 2.0.0
+# Coverage — msgpack 3.0.0
 
 `npm run coverage` runs both halves and fails the build under 95%.
 
@@ -126,12 +126,15 @@ gcovr --root . --filter src/ --exclude deps/ --no-markers --txt-metric branch --
 
 ## What the new tests cover
 
+- `test/bigint.test.js` — `#37` Number-vs-BigInt rule: uint64 of 1 stays
+  Number, `MAX_SAFE_INTEGER` stays Number, reporter uint64 round-trips as
+  BigInt, out-of-range BigInt throws, rounded Number bits are not recovered.
 - `test/coverage-native.test.js` (57 tests) — hand-built wire buffers for
   every MessagePack format family, including the ones `pack()` never emits
   (float32, str8/16/32, bin16/32, array32, map16/32, all eight ext forms,
   negative fixint); a truncation point for every header and payload;
   `kMaxBytes` / `kMaxContainer` / `kMaxDepth` rejections; `0xc1`; the pack-side
-  type dispatch (Symbol, BigInt, non-finite numbers, integer edges, undefined,
+  type dispatch (Symbol, non-finite numbers, integer edges, undefined,
   zero-argument and multi-argument `pack`); Date failure modes; `toJSON`
   failure modes and mark cleanup; and a worker that nests 600 packs deep to
   saturate the thread-local sbuffer pool and reach the "pool is full, free it"

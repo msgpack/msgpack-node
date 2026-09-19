@@ -31,9 +31,16 @@ describe('regressions', () => {
   });
 
   it('still packs integers at the edges of the integer path', () => {
-    for (const n of [0, 1, -1, 2 ** 53, -(2 ** 53), 2 ** 63, -(2 ** 63)]) {
+    for (const n of [0, 1, -1]) {
+      assert.equal(typeof msgpack.unpack(msgpack.pack(n)), 'number');
       assert.equal(msgpack.unpack(msgpack.pack(n)), n);
     }
+    /* Numbers that already sit outside MAX_SAFE_INTEGER pack on the integer
+     * path when they fit uint64/int64, then unpack as BigInt. */
+    assert.equal(msgpack.unpack(msgpack.pack(2 ** 53)), 2n ** 53n);
+    assert.equal(msgpack.unpack(msgpack.pack(-(2 ** 53))), -(2n ** 53n));
+    assert.equal(msgpack.unpack(msgpack.pack(2 ** 63)), 2n ** 63n);
+    assert.equal(msgpack.unpack(msgpack.pack(-(2 ** 63))), -(2n ** 63n));
   });
 
   it('unpacks a map written by Python msgpack (msgpack-node#10)', () => {

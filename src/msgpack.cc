@@ -30,6 +30,10 @@ const int kMaxPackDepth = 512;
 /* Largest/smallest doubles that survive a cast to uint64_t/int64_t. */
 const double kTwoPow64 = 18446744073709551616.0;
 const double kInt64Min = -9223372036854775808.0;
+/* Integers inside this magnitude stay JS Number on unpack, regardless of
+ * wire width. Outside it they become BigInt so uint64/int64 stay exact. */
+const uint64_t kMaxSafeInteger = 9007199254740991ULL;
+const int64_t kMinSafeInteger = -9007199254740991LL;
 const size_t kSbufferPoolMax = 512;
 
 enum ScanStatus {
@@ -523,6 +527,22 @@ static void JsToMsgpack(msgpack_packer* pk, v8::Local<v8::Value> o, int depth) {
     } else {
       rc = msgpack_pack_double(pk, d);
     }
+  } else if (o->IsBigInt()) {
+    /* v8::BigInt, not Number: a JS Number has already lost bits below
+     * 2^53 and must stay on the double/uint64-from-double path above. */
+    v8::Local<v8::BigInt> bi = o.As<v8::BigInt>();
+    bool lossless = false;
+    const int64_t s = bi->Int64Value(&lossless);
+    if (lossless) {
+      rc = msgpack_pack_int64(pk, s);
+    } else {
+      lossless = false;
+      const uint64_t u = bi->Uint64Value(&lossless);
+      if (!lossless) {
+        throw MsgpackException(Error("cannot pack BigInt outside 64-bit range"));
+      }
+      rc = msgpack_pack_uint64(pk, u);
+    }
   } else if (o->IsString()) {
     Nan::Utf8String bytes(o);
     rc = msgpack_pack_str(pk, bytes.length());
@@ -578,11 +598,17 @@ static v8::Local<v8::Value> MsgpackToJs(const msgpack_object* mo) {
     case MSGPACK_OBJECT_BOOLEAN:
       return Nan::New(mo->via.boolean);
     case MSGPACK_OBJECT_POSITIVE_INTEGER:
-      /* Values that fit in 2^53-1 stay as Number; larger become the
-       * closest Number (legacy behavior). */
-      return Nan::New<v8::Number>(static_cast<double>(mo->via.u64));
+      /* Wire width does not decide the JS type: a uint64 of 1 is Number 1.
+       * Only values outside Number.MAX_SAFE_INTEGER become BigInt. */
+      if (mo->via.u64 <= kMaxSafeInteger) {
+        return Nan::New<v8::Number>(static_cast<double>(mo->via.u64));
+      }
+      return v8::BigInt::NewFromUnsigned(v8::Isolate::GetCurrent(), mo->via.u64);
     case MSGPACK_OBJECT_NEGATIVE_INTEGER:
-      return Nan::New<v8::Number>(static_cast<double>(mo->via.i64));
+      if (mo->via.i64 >= kMinSafeInteger) {
+        return Nan::New<v8::Number>(static_cast<double>(mo->via.i64));
+      }
+      return v8::BigInt::New(v8::Isolate::GetCurrent(), mo->via.i64);
     case MSGPACK_OBJECT_FLOAT32:
     case MSGPACK_OBJECT_FLOAT64:
       return Nan::New<v8::Number>(mo->via.f64);

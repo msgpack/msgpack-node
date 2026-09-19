@@ -2,8 +2,8 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 2.0 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, and
-rejects oversized unpack headers instead of allocating them. See
+Version 3.0 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, and
+unpacks 64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`. See
 [`SECURITY.md`](SECURITY.md).
 
 ### Usage
@@ -19,10 +19,10 @@ const oo = msgpack.unpack(b);
 assert.deepEqual(oo, o);
 ```
 
-`pack()` accepts any JSON-like value plus Node `Buffer`s and `Date`s.
-`unpack()` consumes a `Buffer` and returns a JavaScript value, or `null` if
-the buffer is a truncated (incomplete) MessagePack object. Oversized
-array/map/string bombs throw.
+`pack()` accepts any JSON-like value plus Node `Buffer`s, `Date`s, and
+`bigint` values in the int64/uint64 range. `unpack()` consumes a `Buffer`
+and returns a JavaScript value, or `null` if the buffer is a truncated
+(incomplete) MessagePack object. Oversized array/map/string bombs throw.
 
 A streaming helper wraps a readable socket and emits `msg`, plus `error` when
 a packet cannot be unpacked (the offending buffer is dropped):
@@ -39,13 +39,14 @@ ms.on('error', (e) => {
 ms.send({ hello: 'world' });
 ```
 
-### Type mapping (2.0)
+### Type mapping (3.0)
 
 Packing:
 
 * `undefined` / `null` → nil
 * `boolean` → bool
-* finite integers → uint/int
+* finite integers (`number` or `bigint` in the 64-bit range) → uint/int
+* `bigint` outside uint64/int64 → throws
 * other numbers → float64
 * `string` → str (UTF-8)
 * `Date` → str (ISO 8601, `toISOString()`), at any nesting level
@@ -57,14 +58,23 @@ Packing:
   integer keys, not dropped
 * functions, circular refs, and nesting deeper than 512 throw
 
+A `number` that is already rounded (for example `18446464814936021000`) packs
+on the Number path. Lost bits are not recovered.
+
 Unpacking:
 
 * nil → `null`
-* bool / int / float → JS boolean / number
+* bool / float → JS boolean / number
+* int whose magnitude ≤ `Number.MAX_SAFE_INTEGER` → `number` (a uint64 of
+  `1` is Number `1`; `Number.MAX_SAFE_INTEGER` stays Number)
+* int whose magnitude > `Number.MAX_SAFE_INTEGER` → `bigint`
 * str → `string`
 * bin → `Buffer`
 * array / map → Array / Object
 * ext → throws
+
+So `unpack(pack(1n))` is Number `1`, and `unpack(pack(18446464814936021036n))`
+is that same `bigint`.
 
 `unpack.bytes_remaining` is the number of unused trailing bytes after the last
 successful (or attempted) unpack. Stream uses that to splice leftover data.
