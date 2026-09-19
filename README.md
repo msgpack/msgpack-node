@@ -58,7 +58,8 @@ Packing:
 * `undefined` / `null` → nil
 * `boolean` → bool
 * finite integers (`number` or `bigint` in the 64-bit range) → uint/int
-* `bigint` outside uint64/int64 → throws
+* `bigint` outside uint64/int64 → ext type 0x42 (msgpackr BigInt, two's-complement, ≤ 256 bytes)
+* `bigint` whose two's-complement form exceeds 256 bytes → throws
 * other numbers → float64
 * `string` → str (UTF-8)
 * `Date` → str (ISO 8601, `toISOString()`), at any nesting level
@@ -83,7 +84,8 @@ Unpacking:
 * str → `string`
 * bin → `Buffer`
 * array / map → Array / Object
-* ext → throws
+* ext type 0x42 (msgpackr BigInt) → bigint (payload ≤ 256 bytes)
+* other ext types → throws
 
 So `unpack(pack(1n))` is Number `1`, and `unpack(pack(18446464814936021036n))`
 is that same `bigint`.
