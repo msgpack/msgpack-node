@@ -677,6 +677,260 @@ static v8::Local<v8::Value> MsgpackToJs(const msgpack_object* mo) {
   }
 }
 
+/*
+ * Lazy unpack: keep the msgpack zone (and a session-owned copy of the source
+ * bytes) alive, and wrap maps/arrays as JS objects whose values are accessors.
+ * Nested containers are not converted until a property is read. toJSON /
+ * inspect.custom materialize through MsgpackToJs so JSON.stringify and
+ * util.inspect match eager unpack. The copy is required because msgpack-c
+ * aliases str/bin into the input; a Persistent on the caller's Buffer does
+ * not survive ArrayBuffer transfer.
+ */
+class LazySession : public Nan::ObjectWrap {
+ public:
+  msgpack_unpacked unpacked;
+  Nan::Persistent<v8::Object> buffer;
+
+  static NAN_METHOD(New) {
+    LazySession* session = new LazySession();
+    msgpack_unpacked_init(&session->unpacked);
+    session->Wrap(info.This());
+    info.GetReturnValue().Set(info.This());
+  }
+
+  static v8::Local<v8::Object> Create(v8::Local<v8::Object> buf,
+                                      msgpack_unpacked* src) {
+    v8::Local<v8::Function> cons = Nan::New(ctor);
+    v8::Local<v8::Object> inst = Nan::NewInstance(cons).ToLocalChecked();
+    LazySession* session = Nan::ObjectWrap::Unwrap<LazySession>(inst);
+    msgpack_unpacked_destroy(&session->unpacked);
+    session->unpacked = *src;
+    src->zone = NULL;
+    session->buffer.Reset(buf);
+    return inst;
+  }
+
+  ~LazySession() {
+    msgpack_unpacked_destroy(&unpacked);
+    buffer.Reset();
+  }
+
+  static thread_local Nan::Persistent<v8::Function> ctor;
+
+ private:
+  LazySession() {}
+};
+
+thread_local Nan::Persistent<v8::Function> LazySession::ctor;
+
+static thread_local Nan::Persistent<v8::Function> lazy_tojson_fn;
+static thread_local Nan::Persistent<v8::ObjectTemplate> lazy_array_tmpl;
+static thread_local Nan::Persistent<v8::ObjectTemplate> lazy_map_tmpl;
+static thread_local Nan::Persistent<v8::String> lazy_session_key;
+static thread_local Nan::Persistent<v8::String> lazy_mo_key;
+
+static void AttachLazy(v8::Local<v8::Object> obj,
+                       v8::Local<v8::Object> session,
+                       const msgpack_object* mo) {
+  Nan::SetPrivate(obj, Nan::New(lazy_session_key), session);
+  Nan::SetPrivate(obj, Nan::New(lazy_mo_key),
+                  Nan::New<v8::External>(const_cast<msgpack_object*>(mo)));
+}
+
+static v8::Local<v8::Object> LazySessionOf(v8::Local<v8::Object> obj) {
+  Nan::MaybeLocal<v8::Value> v = Nan::GetPrivate(obj, Nan::New(lazy_session_key));
+  /* GCOVR_EXCL_BR_START: only missing if a getter is applied to a foreign object. */
+  if (v.IsEmpty() || !v.ToLocalChecked()->IsObject()) {
+    return Nan::New<v8::Object>();
+  }
+  /* GCOVR_EXCL_BR_STOP */
+  return v.ToLocalChecked().As<v8::Object>();
+}
+
+static const msgpack_object* LazyMoOf(v8::Local<v8::Object> obj) {
+  Nan::MaybeLocal<v8::Value> v = Nan::GetPrivate(obj, Nan::New(lazy_mo_key));
+  /* GCOVR_EXCL_BR_START: same as LazySessionOf. */
+  if (v.IsEmpty() || !v.ToLocalChecked()->IsExternal()) {
+    return NULL;
+  }
+  /* GCOVR_EXCL_BR_STOP */
+  return static_cast<const msgpack_object*>(
+      v.ToLocalChecked().As<v8::External>()->Value());
+}
+
+static v8::Local<v8::Value> MsgpackToJsLazy(const msgpack_object* mo,
+                                            v8::Local<v8::Object> session);
+
+static void InstallLazyMethods(v8::Local<v8::Object> obj) {
+  v8::Local<v8::Function> fn = Nan::New(lazy_tojson_fn);
+  v8::PropertyAttribute hidden =
+      static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum);
+  Nan::DefineOwnProperty(obj, Nan::New("toJSON").ToLocalChecked(), fn, hidden);
+  v8::Local<v8::Symbol> inspect = v8::Symbol::For(
+      v8::Isolate::GetCurrent(),
+      Nan::New("nodejs.util.inspect.custom").ToLocalChecked());
+  obj->DefineOwnProperty(Nan::GetCurrentContext(), inspect, fn, hidden)
+      .FromMaybe(false);
+}
+
+NAN_METHOD(LazyToJSON) {
+  /* NAN_METHOD is sloppy: null/undefined This is boxed to the global. */
+  if (!info.This()->IsObject()) {  /* GCOVR_EXCL_BR_LINE */
+    return Nan::ThrowTypeError("invalid lazy object");  /* GCOVR_EXCL_LINE */
+  }
+  v8::Local<v8::Object> self = info.This();
+  const msgpack_object* mo = LazyMoOf(self);
+  if (mo == NULL) {
+    return Nan::ThrowTypeError("invalid lazy object");
+  }
+  try {
+    info.GetReturnValue().Set(MsgpackToJs(mo));
+  } catch (const MsgpackException& e) {  /* GCOVR_EXCL_BR_LINE: MsgpackToJs throws nothing else */
+    Nan::ThrowError(e.value());
+  }
+}
+
+static v8::Local<v8::Object> WrapLazyArray(const msgpack_object* mo,
+                                           v8::Local<v8::Object> session) {
+  v8::Local<v8::Object> obj =
+      Nan::New(lazy_array_tmpl)->NewInstance(Nan::GetCurrentContext()).ToLocalChecked();
+  AttachLazy(obj, session, mo);
+  Nan::DefineOwnProperty(
+      obj,
+      Nan::New("length").ToLocalChecked(),
+      Nan::New<v8::Uint32>(static_cast<uint32_t>(mo->via.array.size)),
+      static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontEnum));
+  InstallLazyMethods(obj);
+  return obj;
+}
+
+static void LazyMapNameGetter(v8::Local<v8::Name> /*property*/,
+                              const v8::PropertyCallbackInfo<v8::Value>& info) {
+  const msgpack_object* val =
+      static_cast<const msgpack_object*>(info.Data().As<v8::External>()->Value());
+  v8::Local<v8::Object> session = LazySessionOf(info.Holder());
+  try {
+    info.GetReturnValue().Set(MsgpackToJsLazy(val, session));
+  } catch (const MsgpackException& e) {  /* GCOVR_EXCL_BR_LINE: MsgpackToJsLazy throws nothing else */
+    Nan::ThrowError(e.value());
+  }
+}
+
+static v8::Local<v8::Object> WrapLazyMap(const msgpack_object* mo,
+                                         v8::Local<v8::Object> session) {
+  v8::Local<v8::Context> ctx = Nan::GetCurrentContext();
+  v8::Local<v8::Object> obj =
+      Nan::New(lazy_map_tmpl)->NewInstance(ctx).ToLocalChecked();
+  /* ObjectTemplate instances get a hidden prototype. Eager maps are
+     ordinary objects whose [[Prototype]] is Object.prototype. */
+  Nan::SetPrototype(obj, Nan::New<v8::Object>()->GetPrototype());
+  AttachLazy(obj, session, mo);
+  for (uint32_t i = 0; i < mo->via.map.size; i++) {
+    const msgpack_object_kv* kv = &mo->via.map.ptr[i];
+    v8::Local<v8::Value> key = MsgpackToJs(&kv->key);
+    Nan::MaybeLocal<v8::String> name = Nan::To<v8::String>(key);
+    /* GCOVR_EXCL_BR_START: same as eager map keys. */
+    if (name.IsEmpty()) {
+      throw MsgpackException(Error("cannot unpack map key"));
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    if (!obj->SetNativeDataProperty(
+            ctx,
+            name.ToLocalChecked(),
+            LazyMapNameGetter,
+            0,
+            Nan::New<v8::External>(const_cast<msgpack_object*>(&kv->val)))
+            .FromMaybe(false)) {  /* GCOVR_EXCL_BR_LINE: OOM / rejected name */
+      throw MsgpackException(Error("cannot unpack map key"));  /* GCOVR_EXCL_LINE */
+    }
+  }
+  InstallLazyMethods(obj);
+  return obj;
+}
+
+static v8::Local<v8::Value> MsgpackToJsLazy(const msgpack_object* mo,
+                                            v8::Local<v8::Object> session) {
+  switch (mo->type) {
+    case MSGPACK_OBJECT_ARRAY:
+      return WrapLazyArray(mo, session);
+    case MSGPACK_OBJECT_MAP:
+      return WrapLazyMap(mo, session);
+    default:
+      return MsgpackToJs(mo);
+  }
+}
+
+static void LazyIndexGet(uint32_t index,
+                         const v8::PropertyCallbackInfo<v8::Value>& info) {
+  const msgpack_object* mo = LazyMoOf(info.Holder());
+  if (mo == NULL || mo->type != MSGPACK_OBJECT_ARRAY || index >= mo->via.array.size) {
+    return;
+  }
+  v8::Local<v8::Object> session = LazySessionOf(info.Holder());
+  try {
+    info.GetReturnValue().Set(MsgpackToJsLazy(&mo->via.array.ptr[index], session));
+  } catch (const MsgpackException& e) {  /* GCOVR_EXCL_BR_LINE: MsgpackToJsLazy throws nothing else */
+    Nan::ThrowError(e.value());
+  }
+}
+
+static void LazyIndexQuery(uint32_t index,
+                           const v8::PropertyCallbackInfo<v8::Integer>& info) {
+  const msgpack_object* mo = LazyMoOf(info.Holder());
+  if (mo == NULL || mo->type != MSGPACK_OBJECT_ARRAY || index >= mo->via.array.size) {
+    return;
+  }
+  info.GetReturnValue().Set(v8::None);
+}
+
+static void LazyIndexEnum(const v8::PropertyCallbackInfo<v8::Array>& info) {
+  const msgpack_object* mo = LazyMoOf(info.Holder());
+  uint32_t n = 0;
+  if (mo != NULL && mo->type == MSGPACK_OBJECT_ARRAY) {
+    n = static_cast<uint32_t>(mo->via.array.size);
+  }
+  v8::Local<v8::Array> names = Nan::New<v8::Array>(n);
+  for (uint32_t i = 0; i < n; i++) {
+    Nan::Set(names, i, Nan::New(i));
+  }
+  info.GetReturnValue().Set(names);
+}
+
+static void InitLazy() {
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+
+  v8::Local<v8::FunctionTemplate> stpl = Nan::New<v8::FunctionTemplate>(LazySession::New);
+  stpl->SetClassName(Nan::New("MsgpackLazySession").ToLocalChecked());
+  stpl->InstanceTemplate()->SetInternalFieldCount(1);
+  LazySession::ctor.Reset(Nan::GetFunction(stpl).ToLocalChecked());
+
+  lazy_tojson_fn.Reset(
+      Nan::GetFunction(Nan::New<v8::FunctionTemplate>(LazyToJSON)).ToLocalChecked());
+
+  v8::Local<v8::ObjectTemplate> arr = v8::ObjectTemplate::New(isolate);
+  arr->SetIndexedPropertyHandler(LazyIndexGet, 0, LazyIndexQuery, 0, LazyIndexEnum);
+  lazy_array_tmpl.Reset(arr);
+
+  v8::Local<v8::ObjectTemplate> map = v8::ObjectTemplate::New(isolate);
+  map->SetIndexedPropertyHandler(LazyIndexGet, 0, LazyIndexQuery, 0, LazyIndexEnum);
+  lazy_map_tmpl.Reset(map);
+
+  lazy_session_key.Reset(Nan::New("msgpack:lazySession").ToLocalChecked());
+  lazy_mo_key.Reset(Nan::New("msgpack:lazyMo").ToLocalChecked());
+}
+
+static bool UnpackLazyRequested(const Nan::FunctionCallbackInfo<v8::Value>& info) {
+  if (info.Length() < 2 || !info[1]->IsObject() || info[1]->IsArray()) {
+    return false;
+  }
+  Nan::MaybeLocal<v8::Value> maybe =
+      Nan::Get(info[1].As<v8::Object>(), Nan::New("lazy").ToLocalChecked());
+  if (maybe.IsEmpty()) {  /* GCOVR_EXCL_LINE */
+    return false;         /* GCOVR_EXCL_LINE */
+  }
+  return maybe.ToLocalChecked()->IsTrue();
+}
+
 struct SbufPool {
   msgpack_sbuffer* list[kSbufferPoolMax];
   size_t length;
@@ -824,6 +1078,26 @@ NAN_METHOD(Unpack) {
     return Nan::ThrowError("Encountered error unpacking buffer");
   }
 
+  /* Copy before unpack_next so via.str/via.bin alias session-owned bytes.
+   * Nan::Persistent on the caller's Buffer does not keep the backing store
+   * through structuredClone / postMessage transfer (CWE-416). */
+  if (UnpackLazyRequested(info)) {
+    /* GCOVR_EXCL_BR_START: node Buffers are smaller than UINT32_MAX. */
+    if (len > static_cast<size_t>(UINT32_MAX)) {
+      return Nan::ThrowError("Error copying buffer");
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    Nan::MaybeLocal<v8::Object> copied =
+        Nan::CopyBuffer(data, static_cast<uint32_t>(len));
+    /* GCOVR_EXCL_BR_START: CopyBuffer fails only when V8 is out of memory. */
+    if (copied.IsEmpty()) {
+      return Nan::ThrowError("Error copying buffer");
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    buf = copied.ToLocalChecked();
+    data = node::Buffer::Data(buf);
+  }
+
   msgpack_unpacked result;
   msgpack_unpacked_init(&result);
   size_t off = 0;
@@ -840,11 +1114,20 @@ NAN_METHOD(Unpack) {
    * msgpack_unpack_next never returns EXTRA_BYTES. */
   if (ret == MSGPACK_UNPACK_SUCCESS || ret == MSGPACK_UNPACK_EXTRA_BYTES) {  /* GCOVR_EXCL_BR_LINE */
     try {
-      v8::Local<v8::Value> v = MsgpackToJs(&result.data);
-      msgpack_unpacked_destroy(&result);
+      v8::Local<v8::Value> v;
+      if (UnpackLazyRequested(info) &&
+          (result.data.type == MSGPACK_OBJECT_ARRAY ||
+           result.data.type == MSGPACK_OBJECT_MAP)) {
+        v8::Local<v8::Object> session = LazySession::Create(buf, &result);
+        LazySession* hold = Nan::ObjectWrap::Unwrap<LazySession>(session);
+        v = MsgpackToJsLazy(&hold->unpacked.data, session);
+      } else {
+        v = MsgpackToJs(&result.data);
+        msgpack_unpacked_destroy(&result);
+      }
       info.GetReturnValue().Set(v);
       return;
-    } catch (const MsgpackException& e) {  /* GCOVR_EXCL_BR_LINE: MsgpackToJs throws nothing else */
+    } catch (const MsgpackException& e) {  /* GCOVR_EXCL_BR_LINE: convert throws nothing else */
       msgpack_unpacked_destroy(&result);
       return Nan::ThrowError(e.value());
     }
@@ -863,6 +1146,7 @@ NAN_METHOD(Unpack) {
 
 NAN_MODULE_INIT(Init) {
   stack_key.Reset(Nan::New("_msgpack_stack").ToLocalChecked());
+  InitLazy();
   Nan::Set(target, Nan::New("pack").ToLocalChecked(),
            Nan::GetFunction(Nan::New<v8::FunctionTemplate>(Pack)).ToLocalChecked());
   Nan::Set(target, Nan::New("unpack").ToLocalChecked(),

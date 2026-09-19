@@ -1,4 +1,4 @@
-# Coverage — msgpack 3.1.0
+# Coverage — msgpack 3.2.0
 
 `npm run coverage` runs both halves and fails the build under 95%.
 
@@ -8,9 +8,9 @@
 | `lib/` + `bin/` (c8) | branches | **100%** | ≥ 95% |
 | `lib/` + `bin/` (c8) | functions | **100%** | ≥ 95% |
 | `lib/` + `bin/` (c8) | lines | **100%** | ≥ 95% |
-| `src/` (gcovr) | lines | **95.2%** (902/947) | ≥ 95% |
-| `src/` (gcovr) | branches | **95.4%** (836/876) | ≥ 95% |
-| `src/` (gcovr) | functions | 100% (59/59) | — |
+| `src/` (gcovr) | lines | **95.7%** (1002/1047) | ≥ 95% |
+| `src/` (gcovr) | branches | **95.5%** (976/1022) | ≥ 95% |
+| `src/` (gcovr) | functions | 100% (66/66) | — |
 
 `deps/` is excluded from the native report; the vendored msgpack-c is not our
 code. `build/` is rebuilt without instrumentation at the end of
@@ -146,6 +146,14 @@ gcovr --root . --filter src/ --exclude deps/ --no-markers --txt-metric branch --
   `kMaxPackDepth`) are marked `GCOVR_EXCL_*`, not deleted. Native overall
   stays above the 95% gate (`pack_hints.inc` itself is 91% branches because
   switch `default:` edges sit on the same line as covered cases).
+- `test/lazy.test.js` — `#40` `unpack(buf, { lazy: true })`: one-arg eager
+  identity, nested `o.c[1]` without reading siblings, `__proto__` /
+  `constructor` as own properties, oversized headers still throw, incomplete
+  buffers still return `null`, `toJSON` / `JSON.stringify` / `util.inspect`
+  match eager unpack, nested BigInt, non-object second args, toJSON
+  `this` checks, and str/bin reads after the caller Buffer is transferred.
+  Lazy OOM / empty-Maybe / ObjectTemplate-failure / CopyBuffer-failure arms
+  are marked `GCOVR_EXCL_*`, not deleted.
 - `test/cli.test.js` (12 tests) — the exit-1 paths of both CLIs: invalid JSON,
   empty stdin, a pack rejection reachable from real JSON, an unparseable byte,
   an oversized header, incomplete input both alone and after a good frame, and

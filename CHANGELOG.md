@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-19
+
+Optional second-argument unpack option `{ lazy: true }` wraps maps and arrays
+as accessors so nested values are not converted until they are read. See `#40`.
+
+### Added
+
+- `unpack(buf, { lazy: true })` keeps the decoder zone alive and returns maps
+  as objects with accessor own-properties and arrays as array-likes with
+  indexed accessors (`length`, `in`, `Object.keys`). Nested maps and arrays
+  stay lazy until a property is read.
+- `toJSON` and `util.inspect.custom` materialize through the eager converter,
+  so `JSON.stringify` and `util.inspect` match eager unpack. `pack()` of a
+  lazy value also round-trips because it calls `toJSON`.
+- Primitives, incomplete buffers, trailing `bytes_remaining`, and the DoS
+  limits are unchanged. `__proto__` / `constructor` stay own properties.
+- Lazy unpack copies the input before decode so str/bin do not alias the
+  caller's Buffer. Transferring that Buffer after unpack cannot dangle
+  later property reads.
+
 ## [3.1.0] - 2026-09-19
 
 Optional second-argument pack hints force a MessagePack wire type or family
@@ -108,7 +128,8 @@ GitHub Actions tests Node 18/20/22 on Ubuntu, macOS, and Windows 2022.
 - Pack throw paths free or return pooled sbuffers on every exit.
 - msgpack-c c-7.0.2 includes unpacker buffer-expansion overflow checks.
 
-[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/msgpack/msgpack-node/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/msgpack/msgpack-node/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/msgpack/msgpack-node/compare/e04c9b55f98d64512174d6e859b8294b729659a2...HEAD
 [2.0.0]: https://github.com/msgpack/msgpack-node/commit/e04c9b55f98d64512174d6e859b8294b729659a2

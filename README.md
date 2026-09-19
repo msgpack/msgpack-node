@@ -2,9 +2,10 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 3.1 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, unpacks
-64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`, and accepts
-optional pack type/family hints. See [`SECURITY.md`](SECURITY.md).
+Version 3.2 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, unpacks
+64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`, accepts
+optional pack type/family hints, and can unpack maps and arrays lazily
+(`unpack(buf, { lazy: true })`). See [`SECURITY.md`](SECURITY.md).
 
 ### Usage
 
@@ -78,6 +79,17 @@ is that same `bigint`.
 
 `unpack.bytes_remaining` is the number of unused trailing bytes after the last
 successful (or attempted) unpack. Stream uses that to splice leftover data.
+
+`unpack(buf, { lazy: true })` wraps maps as objects with accessor
+own-properties and arrays as array-likes with indexed accessors. Nested
+values are not converted until they are read, which is useful for large
+payloads when only a few keys are needed. The decoder copies `buf` so later
+reads do not depend on the caller's backing store (transfer / detach is
+safe). `JSON.stringify` and `util.inspect` materialize via `toJSON` /
+`inspect.custom`. Lazy arrays are not real `Array`s (`Array.isArray` is
+false); `pack()` still round-trips them because it calls `toJSON`.
+Primitives unpack eagerly even when `lazy` is set. `__proto__` and
+`constructor` keys stay own properties, same as eager unpack.
 
 ### Pack type hints (3.1)
 

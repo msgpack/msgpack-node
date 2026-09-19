@@ -1,7 +1,7 @@
 {
   "name": "msgpack",
   "description": "A space-efficient object serialization library for Node.js",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "homepage": "https://github.com/msgpack/msgpack-node",
   "author": "Peter Griess <pg@std.in>",
   "contributors": [
@@ -34,7 +34,7 @@
     "nan": "^2.23.1"
   },
   "scripts": {
-    "test": "node --test test/bigint.test.js test/cli.test.js test/coverage-native.test.js test/msgpack.test.js test/pack-hints.test.js test/regression.test.js test/security.test.js test/worker.test.js",
+    "test": "node --test test/bigint.test.js test/cli.test.js test/coverage-native.test.js test/lazy.test.js test/msgpack.test.js test/pack-hints.test.js test/regression.test.js test/security.test.js test/worker.test.js",
     "bench": "node test/benchmark/benchmark.js",
     "rebuild": "node-gyp rebuild",
     "coverage": "npm run coverage:js && npm run coverage:native",
