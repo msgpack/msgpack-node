@@ -1,4 +1,4 @@
-// Type definitions for msgpack 3.1.0
+// Type definitions for msgpack 3.2.0
 // Project: https://github.com/msgpack/msgpack-node
 
 /// <reference types="node" />
@@ -74,8 +74,15 @@ export function pack(...values: any[]): Buffer;
  * Returns `null` when the buffer holds an incomplete value, in which case
  * `unpack.bytes_remaining` equals `buf.length`. Throws on malformed input or
  * when a container/string/bin header exceeds the decoder's limits.
+ *
+ * Pass `{ lazy: true }` to wrap maps as objects with accessor own-properties
+ * and arrays as array-likes with indexed accessors. Nested values are not
+ * converted until read. `JSON.stringify` and `util.inspect` materialize via
+ * `toJSON` / `inspect.custom`. Lazy arrays are not real `Array`s
+ * (`Array.isArray` is false); `pack()` still round-trips them because it
+ * calls `toJSON`. Primitives unpack eagerly even when `lazy` is set.
  */
-export function unpack(buf: Buffer): any;
+export function unpack(buf: Buffer, opts?: { lazy?: boolean }): any;
 
 export namespace unpack {
     /**
