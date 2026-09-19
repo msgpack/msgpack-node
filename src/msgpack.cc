@@ -15,6 +15,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 
 #include <nan.h>
 #include <msgpack.h>
@@ -425,6 +427,18 @@ static v8::Local<v8::Array> CheckedOwnNames(v8::Local<v8::Object> obj) {
   return r.ToLocalChecked();
 }
 
+static v8::Local<v8::Value> CallOneArg(v8::Local<v8::Object> recv,
+                                       v8::Local<v8::Function> fn,
+                                       v8::Local<v8::Value> arg) {
+  Nan::TryCatch try_catch;
+  v8::Local<v8::Value> argv[1] = {arg};
+  Nan::MaybeLocal<v8::Value> r = Nan::Call(fn, recv, 1, argv);
+  if (r.IsEmpty()) {
+    ThrowCaught(try_catch);  /* GCOVR_EXCL_BR_LINE: never returns */
+  }
+  return r.ToLocalChecked();
+}
+
 static void PackArray(msgpack_packer* pk, v8::Local<v8::Array> arr, int depth) {
   if (IsMarked(arr)) {
     throw MsgpackException(Error("Cowardly refusing to pack circular reference"));
@@ -588,6 +602,8 @@ static void JsToMsgpack(msgpack_packer* pk, v8::Local<v8::Value> o, int depth) {
   }
   /* GCOVR_EXCL_BR_STOP */
 }
+
+#include "pack_hints.inc"
 
 static v8::Local<v8::Value> MsgpackToJs(const msgpack_object* mo);
 
@@ -755,6 +771,9 @@ NAN_METHOD(Pack) {
 
     if (info.Length() == 1) {
       JsToMsgpack(&pk, info[0], 0);
+    } else if (info.Length() == 2 && IsPackOptionsObject(info[1])) {
+      PackHint hint = ParsePackOptions(info[1].As<v8::Object>());
+      JsToMsgpackHinted(&pk, info[0], 0, hint);
     } else {
       /* GCOVR_EXCL_BR_START: allocation failure only. */
       if (msgpack_pack_array(&pk, info.Length())) {

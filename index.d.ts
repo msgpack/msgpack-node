@@ -1,9 +1,46 @@
-// Type definitions for msgpack 3.0.0
+// Type definitions for msgpack 3.1.0
 // Project: https://github.com/msgpack/msgpack-node
 
 /// <reference types="node" />
 
 import { EventEmitter } from 'events';
+
+export type PackType =
+  | 'fixint'
+  | 'uint8'
+  | 'uint16'
+  | 'uint32'
+  | 'uint64'
+  | 'int8'
+  | 'int16'
+  | 'int32'
+  | 'int64'
+  | 'float32'
+  | 'float64'
+  | 'fixstr'
+  | 'str8'
+  | 'str16'
+  | 'str32'
+  | 'bin8'
+  | 'bin16'
+  | 'bin32'
+  | 'nil'
+  | 'true'
+  | 'false';
+
+export type PackFamily = 'int' | 'float' | 'str' | 'bin';
+
+export interface PackInterpretResult {
+  data: any;
+  type?: PackType;
+  family?: PackFamily;
+}
+
+export interface PackOptions {
+  type?: PackType;
+  family?: PackFamily;
+  interpret?: (item: any) => PackInterpretResult;
+}
 
 /**
  * Serialize values to MessagePack.
@@ -11,11 +48,20 @@ import { EventEmitter } from 'events';
  * A single argument is packed as itself; two or more are packed as an array
  * of that many elements.
  *
+ * When the second argument own-enumerates only `type`, `family`, and/or
+ * `interpret`, it is pack options rather than a second value. `type` forces
+ * a MessagePack wire type; `family` picks a compact encoding in that family
+ * (`type` wins if both are set). `interpret` is used when packing an Array:
+ * each element is replaced by `interpret(item)`, which must return `{ data }`
+ * and may also set `type` / `family`.
+ *
  * `bigint` values in the int64/uint64 range pack as MessagePack integers
  * (smallest family that fits). Values outside that range throw. A `number`
  * that has already lost bits below 2^53 stays on the Number path; lost bits
- * are not recovered.
+ * are not recovered. BigInt plus an integer `type`/`family` uses the same
+ * 64-bit path.
  */
+export function pack(value: any, options: PackOptions): Buffer;
 export function pack(...values: any[]): Buffer;
 
 /**

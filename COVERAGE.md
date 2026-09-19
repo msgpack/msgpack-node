@@ -1,4 +1,4 @@
-# Coverage — msgpack 3.0.0
+# Coverage — msgpack 3.1.0
 
 `npm run coverage` runs both halves and fails the build under 95%.
 
