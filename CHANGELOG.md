@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-09-19
+
+Pack `bigint` values outside the 64-bit integer range as MessagePack ext
+type `0x42` (msgpackr `useBigIntExtension` two's-complement payload), and
+unpack that type back to `bigint`. Payload is capped at 256 bytes. Values
+that still fit int64/uint64 keep using integer wire.
+
+### Added
+
+- Out-of-range `bigint` packs as ext `0x42` and round-trips through
+  `unpack()`, including nested arrays/maps/objects, uint256, and the
+  64-bit boundaries `2^64` and `-2^63-1`.
+- Unpack of ext `0x42` with a payload larger than 256 bytes throws
+  `cannot unpack BigInt: ext payload exceeds 256 bytes`. Other ext types
+  still throw `cannot unpack ext type`.
+
+### Changed
+
+- `cannot pack BigInt outside 64-bit range` is no longer thrown for
+  values that fit in a 256-byte ext payload. Larger values throw
+  `cannot pack BigInt: ext payload exceeds 256 bytes`.
+
 ## [3.3.0] - 2026-09-19
 
 `Stream.send` queues packed messages when the underlying writable returns
@@ -152,7 +174,8 @@ GitHub Actions tests Node 18/20/22 on Ubuntu, macOS, and Windows 2022.
 - Pack throw paths free or return pooled sbuffers on every exit.
 - msgpack-c c-7.0.2 includes unpacker buffer-expansion overflow checks.
 
-[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/msgpack/msgpack-node/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/msgpack/msgpack-node/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/msgpack/msgpack-node/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/msgpack/msgpack-node/compare/v3.0.0...v3.1.0

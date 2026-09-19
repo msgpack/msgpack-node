@@ -1,4 +1,4 @@
-// Type definitions for msgpack 3.3.0
+// Type definitions for msgpack 3.4.0
 // Project: https://github.com/msgpack/msgpack-node
 
 /// <reference types="node" />
@@ -56,10 +56,12 @@ export interface PackOptions {
  * and may also set `type` / `family`.
  *
  * `bigint` values in the int64/uint64 range pack as MessagePack integers
- * (smallest family that fits). Values outside that range throw. A `number`
- * that has already lost bits below 2^53 stays on the Number path; lost bits
- * are not recovered. BigInt plus an integer `type`/`family` uses the same
- * 64-bit path.
+ * (smallest family that fits). Larger values pack as ext type 0x42 (msgpackr
+ * BigInt extension) with a two's-complement payload of at most 256 bytes.
+ * Still larger values throw. A `number` that has already lost bits below
+ * 2^53 stays on the Number path; lost bits are not recovered. BigInt plus
+ * an integer `type`/`family` uses the same 64-bit path (hints do not
+ * truncate into ext).
  */
 export function pack(value: any, options: PackOptions): Buffer;
 export function pack(...values: any[]): Buffer;
@@ -69,7 +71,8 @@ export function pack(...values: any[]): Buffer;
  *
  * Integers whose magnitude is greater than `Number.MAX_SAFE_INTEGER` return
  * as `bigint`. Values that fit stay `number`, even if the wire type is
- * uint64 or int64 (a uint64 of 1 is Number 1).
+ * uint64 or int64 (a uint64 of 1 is Number 1). Ext type 0x42 unpacks as
+ * `bigint` (payload capped at 256 bytes). Other ext types throw.
  *
  * Returns `null` when the buffer holds an incomplete value, in which case
  * `unpack.bytes_remaining` equals `buf.length`. Throws on malformed input or

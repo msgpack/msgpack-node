@@ -37,6 +37,10 @@ const double kInt64Min = -9223372036854775808.0;
 const uint64_t kMaxSafeInteger = 9007199254740991ULL;
 const int64_t kMinSafeInteger = -9007199254740991LL;
 const size_t kSbufferPoolMax = 512;
+/* msgpackr useBigIntExtension: two's-complement BigInt as ext type 0x42 ('B'). */
+const int8_t kBigIntExtType = 0x42;
+const uint32_t kMaxBigIntExtBytes = 256;
+const int kMaxBigIntExtWords = 32;
 
 enum ScanStatus {
   kScanOk = 0,
@@ -332,6 +336,149 @@ static v8::Local<v8::Value> Error(const char* msg) {
   return Nan::Error(msg);
 }
 
+/*
+ * Pack a BigInt that does not fit int64/uint64 as MessagePack ext 0x42.
+ * Payload is two's-complement big-endian bytes, minimal length, sign-extended
+ * so the high bit matches the sign (msgpackr useBigIntExtension algorithm).
+ * Fail closed at 256 payload bytes (2048-bit).
+ */
+static void PackBigIntExt(msgpack_packer* pk, v8::Local<v8::BigInt> bi) {
+  int word_count = bi->WordCount();
+  if (word_count > kMaxBigIntExtWords) {
+    throw MsgpackException(
+        Error("cannot pack BigInt: ext payload exceeds 256 bytes"));
+  }
+  uint64_t words[32];
+  memset(words, 0, sizeof(words));
+  int sign_bit = 0;
+  if (word_count > 0) {
+    int wc = word_count;
+    bi->ToWordsArray(&sign_bit, &wc, words);
+    word_count = wc;
+  }
+  unsigned char tmp[256];
+  memset(tmp, 0, sizeof(tmp));
+  size_t n = static_cast<size_t>(word_count) * 8u;
+  /* GCOVR_EXCL_START: WordCount is 0 only for 0n, which takes the int64 path. */
+  if (n == 0) {
+    tmp[0] = 0;
+    n = 1;
+  } else {
+    /* GCOVR_EXCL_STOP */
+    for (int i = 0; i < word_count; i++) {
+      uint64_t w = words[i];
+      for (int b = 0; b < 8; b++) {
+        tmp[static_cast<size_t>(i) * 8u + static_cast<size_t>(b)] =
+            static_cast<unsigned char>(w & 0xffu);
+        w >>= 8;
+      }
+    }
+  }
+  if (sign_bit) {
+    unsigned int carry = 1;
+    for (size_t i = 0; i < n; i++) {
+      unsigned int v =
+          static_cast<unsigned int>(static_cast<unsigned char>(~tmp[i])) + carry;
+      tmp[i] = static_cast<unsigned char>(v);
+      carry = v >> 8;
+    }
+    if ((tmp[n - 1] & 0x80u) == 0) {
+      if (n >= kMaxBigIntExtBytes) {
+        throw MsgpackException(
+            Error("cannot pack BigInt: ext payload exceeds 256 bytes"));
+      }
+      tmp[n] = 0xff;
+      n++;
+    }
+  } else if ((tmp[n - 1] & 0x80u) != 0) {
+    if (n >= kMaxBigIntExtBytes) {
+      throw MsgpackException(
+          Error("cannot pack BigInt: ext payload exceeds 256 bytes"));
+    }
+    tmp[n] = 0x00;
+    n++;
+  }
+  while (n > 1) {
+    if (tmp[n - 1] == 0x00 && (tmp[n - 2] & 0x80u) == 0) {
+      n--;
+      continue;
+    }
+    if (tmp[n - 1] == 0xff && (tmp[n - 2] & 0x80u) != 0) {
+      n--;
+      continue;
+    }
+    break;
+  }
+  /* GCOVR_EXCL_START: sign-extend already threw at 257 bytes; strip only shrinks. */
+  if (n > kMaxBigIntExtBytes) {
+    throw MsgpackException(
+        Error("cannot pack BigInt: ext payload exceeds 256 bytes"));
+  }
+  /* GCOVR_EXCL_STOP */
+  unsigned char be[256];
+  for (size_t i = 0; i < n; i++) {
+    be[i] = tmp[n - 1 - i];
+  }
+  int rc = msgpack_pack_ext(pk, n, kBigIntExtType);
+  if (rc == 0) {  /* GCOVR_EXCL_BR_LINE: sbuffer write failure */
+    rc = msgpack_pack_ext_body(pk, be, n);
+  }
+  /* GCOVR_EXCL_START: sbuffer write failure */
+  if (rc != 0) {
+    throw MsgpackException(Error("Error serializing object"));
+  }
+  /* GCOVR_EXCL_STOP */
+}
+
+static v8::Local<v8::Value> ExtBigIntToJs(const char* ptr, uint32_t size) {
+  if (size == 0) {
+    throw MsgpackException(Error("cannot unpack BigInt"));
+  }
+  if (size > kMaxBigIntExtBytes) {
+    throw MsgpackException(
+        Error("cannot unpack BigInt: ext payload exceeds 256 bytes"));
+  }
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(ptr);
+  unsigned char mag[256];
+  memcpy(mag, p, size);
+  const bool neg = (mag[0] & 0x80u) != 0;
+  if (neg) {
+    unsigned int carry = 1;
+    for (int i = static_cast<int>(size) - 1; i >= 0; i--) {
+      unsigned int v =
+          static_cast<unsigned int>(static_cast<unsigned char>(~mag[i])) + carry;
+      mag[i] = static_cast<unsigned char>(v);
+      carry = v >> 8;
+    }
+  }
+  uint32_t start = 0;
+  while (start + 1u < size && mag[start] == 0) {
+    start++;
+  }
+  const uint32_t nbytes = size - start;
+  int word_count = static_cast<int>((nbytes + 7u) / 8u);
+  if (word_count == 0) {  /* GCOVR_EXCL_BR_LINE: nbytes is at least 1 after size==0 throw */
+    word_count = 1;
+  }
+  uint64_t words[32];
+  memset(words, 0, sizeof(words));
+  int byte_i = 0;
+  for (int i = static_cast<int>(size) - 1; i >= static_cast<int>(start); i--) {
+    const int wi = byte_i / 8;
+    const int sh = (byte_i % 8) * 8;
+    words[wi] |= static_cast<uint64_t>(mag[i]) << sh;
+    byte_i++;
+  }
+  v8::MaybeLocal<v8::BigInt> maybe = v8::BigInt::NewFromWords(
+      Nan::GetCurrentContext(), neg ? 1 : 0, word_count, words);
+  /* GCOVR_EXCL_START: NewFromWords fails only on OOM / isolate death. */
+  if (maybe.IsEmpty()) {
+    throw MsgpackException(Error("cannot unpack BigInt"));
+  }
+  /* GCOVR_EXCL_STOP */
+  return maybe.ToLocalChecked();
+}
+
 /* Persistent identity flag for cycle detection (not enumerable).
  * thread_local because a v8::Persistent belongs to the isolate that created
  * it: with a process-global handle, a worker's Init() would dispose the main
@@ -552,10 +699,12 @@ static void JsToMsgpack(msgpack_packer* pk, v8::Local<v8::Value> o, int depth) {
     } else {
       lossless = false;
       const uint64_t u = bi->Uint64Value(&lossless);
-      if (!lossless) {
-        throw MsgpackException(Error("cannot pack BigInt outside 64-bit range"));
+      if (lossless) {
+        rc = msgpack_pack_uint64(pk, u);
+      } else {
+        PackBigIntExt(pk, bi);
+        return;
       }
-      rc = msgpack_pack_uint64(pk, u);
     }
   } else if (o->IsString()) {
     Nan::Utf8String bytes(o);
@@ -638,10 +787,14 @@ static v8::Local<v8::Value> MsgpackToJs(const msgpack_object* mo) {
         return Nan::NewBuffer(0).ToLocalChecked();
       }
       return Nan::CopyBuffer(mo->via.bin.ptr, mo->via.bin.size).ToLocalChecked();
-    case MSGPACK_OBJECT_EXT:
-      /* Fail closed on extension types: callers expecting core JSON-like
-       * values should not silently receive opaque ext payloads. */
-      throw MsgpackException(Error("cannot unpack ext type"));
+    case MSGPACK_OBJECT_EXT: {
+      /* ext 0x42 is msgpackr BigInt. Every other ext type stays fail-closed. */
+      const msgpack_object_ext& ext = mo->via.ext;
+      if (ext.type != kBigIntExtType) {
+        throw MsgpackException(Error("cannot unpack ext type"));
+      }
+      return ExtBigIntToJs(ext.ptr, ext.size);
+    }
     case MSGPACK_OBJECT_ARRAY: {
       v8::Local<v8::Array> arr = Nan::New<v8::Array>(mo->via.array.size);
       for (uint32_t i = 0; i < mo->via.array.size; i++) {
