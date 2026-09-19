@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-19
+
+Optional second-argument pack hints force a MessagePack wire type or family
+without changing the default mapping. Two or more values still pack as an
+array. See `#52`.
+
+### Added
+
+- `pack(value, { type })` writes a fixed MessagePack type (`fixint`,
+  `uint8`…`uint64`, `int8`…`int64`, `float32`/`float64`, `fixstr`/`str8`…
+  `str32`, `bin8`…`bin32`, `nil`/`true`/`false`). Out-of-range values throw
+  `cannot pack value as <type>`.
+- `pack(value, { family })` picks a compact encoding in that family (`int`,
+  `float`, `str`, `bin`). `type` wins if both are set.
+- `pack(array, { interpret })` maps each element through `interpret(item)`
+  which must return `{ data }` and may also set `type` / `family`.
+- Detection is last-argument, two-arg only: the object must own-enumerate
+  only `type`, `family`, and/or `interpret`. Extra keys, one-arg objects, and
+  `pack(1, 2)` keep the old array packing.
+
 ## [3.0.0] - 2026-09-19
 
 Integers whose magnitude is greater than `Number.MAX_SAFE_INTEGER` unpack as
@@ -88,6 +108,7 @@ GitHub Actions tests Node 18/20/22 on Ubuntu, macOS, and Windows 2022.
 - Pack throw paths free or return pooled sbuffers on every exit.
 - msgpack-c c-7.0.2 includes unpacker buffer-expansion overflow checks.
 
-[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/msgpack/msgpack-node/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/msgpack/msgpack-node/compare/e04c9b55f98d64512174d6e859b8294b729659a2...HEAD
 [2.0.0]: https://github.com/msgpack/msgpack-node/commit/e04c9b55f98d64512174d6e859b8294b729659a2

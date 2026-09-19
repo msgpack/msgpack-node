@@ -2,9 +2,9 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 3.0 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, and
-unpacks 64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`. See
-[`SECURITY.md`](SECURITY.md).
+Version 3.1 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, unpacks
+64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`, and accepts
+optional pack type/family hints. See [`SECURITY.md`](SECURITY.md).
 
 ### Usage
 
@@ -78,6 +78,47 @@ is that same `bigint`.
 
 `unpack.bytes_remaining` is the number of unused trailing bytes after the last
 successful (or attempted) unpack. Stream uses that to splice leftover data.
+
+### Pack type hints (3.1)
+
+`pack(value, options)` takes an optional last-argument options object when
+there are exactly two arguments and that object own-enumerates only `type`,
+`family`, and/or `interpret`. Extra keys, a one-argument `{ type: ... }`
+value, and `pack(1, 2)` still pack as values / an array.
+
+```javascript
+msgpack.pack(123, { type: 'fixint' });          // 0x7b
+msgpack.pack(123, { type: 'uint8' });           // 0xcc 0x7b
+msgpack.pack(Math.PI, { type: 'float32' });     // 0xca + 4 bytes
+msgpack.pack(buf, { family: 'bin' });
+msgpack.pack(1.5, { family: 'int' });           // throws
+msgpack.pack(500, { type: 'uint8' });           // throws
+
+msgpack.pack(
+  [
+    { data: Math.PI, type: 'float64' },
+    { data: 3.14, type: 'float32' },
+  ],
+  {
+    interpret(item) {
+      return { data: item.data, type: item.type };
+    },
+  },
+);
+```
+
+`type` forces that MessagePack type (`fixint`, `uint8`…`uint64`, `int8`…
+`int64`, `float32`/`float64`, `fixstr`/`str8`/`str16`/`str32`, `bin8`/`bin16`/
+`bin32`, `nil`/`true`/`false`). `family` (`int`, `float`, `str`, `bin`) picks
+a compact encoding in that family. If both are set, `type` wins. Out-of-range
+values throw `cannot pack value as <type>`.
+
+`interpret` is used when packing an Array. Each element is passed to
+`interpret(item)`, which must return `{ data }` and may also set `type` /
+`family` for that element. Nested `interpret` on the returned object is
+ignored.
+
+Default packing is unchanged when no recognized options object is passed.
 
 ### Limits
 
