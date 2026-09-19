@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-09-19
+
+`Stream.send` queues packed messages when the underlying writable returns
+`false`, re-emits `drain`, and refuses more than 1024 pending messages.
+See `#43`.
+
+### Added
+
+- `Stream` re-emits `drain` from the underlying writable so callers can
+  listen on the msgpack Stream, not only on the raw socket.
+- After `write()` returns `false`, further `send()` calls queue the already
+  packed Buffer and flush FIFO on `drain`. `send()` stays synchronous and
+  returns the boolean from `write()`, or `false` if the message was queued.
+- Extra arguments (encoding, callback) are still forwarded to `write` on an
+  immediate write. Queued flushes call `write(buf)` without inventing an
+  encoding; a callback supplied on a queued `send` runs after that buffer is
+  written, or with an error if the queue is dropped.
+- The pending-send queue is capped at **1024** messages. A further `send()`
+  throws a catchable `Error` whose message mentions backpressure / queue
+  full.
+- If the underlying stream emits `error`, `close`, or `end` with messages
+  still queued, the queue is dropped and Stream emits `error`. An empty
+  queue does not emit that extra error. Handlers do not throw.
+
 ## [3.2.0] - 2026-09-19
 
 Optional second-argument unpack option `{ lazy: true }` wraps maps and arrays
@@ -128,7 +152,8 @@ GitHub Actions tests Node 18/20/22 on Ubuntu, macOS, and Windows 2022.
 - Pack throw paths free or return pooled sbuffers on every exit.
 - msgpack-c c-7.0.2 includes unpacker buffer-expansion overflow checks.
 
-[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/msgpack/msgpack-node/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/msgpack/msgpack-node/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/msgpack/msgpack-node/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/msgpack/msgpack-node/compare/e04c9b55f98d64512174d6e859b8294b729659a2...HEAD
