@@ -42,9 +42,17 @@ describe('unpack format families', () => {
     assert.equal(msgpack.unpack(b(0xcc, 0xff)), 255);
     assert.equal(msgpack.unpack(b(0xcd, 0xff, 0xff)), 65535);
     assert.equal(msgpack.unpack(b(0xce, 0xff, 0xff, 0xff, 0xff)), 4294967295);
+    /* uint64 of 1 and of MAX_SAFE_INTEGER stay Number. */
+    const u64one = b(0xcf, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01);
+    assert.equal(typeof msgpack.unpack(u64one), 'number');
+    assert.equal(msgpack.unpack(u64one), 1);
+    const u64safe = b(0xcf, 0x00, 0x1f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
+    assert.equal(typeof msgpack.unpack(u64safe), 'number');
+    assert.equal(msgpack.unpack(u64safe), Number.MAX_SAFE_INTEGER);
+    /* 2^53+1 is outside MAX_SAFE_INTEGER, so BigInt keeps it exact. */
     assert.equal(
       msgpack.unpack(b(0xcf, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01)),
-      9007199254740993 /* nearest double to 2^53+1 */
+      9007199254740993n
     );
   });
 
@@ -52,9 +60,15 @@ describe('unpack format families', () => {
     assert.equal(msgpack.unpack(b(0xd0, 0x80)), -128);
     assert.equal(msgpack.unpack(b(0xd1, 0x80, 0x00)), -32768);
     assert.equal(msgpack.unpack(b(0xd2, 0x80, 0x00, 0x00, 0x00)), -2147483648);
+    const i64neg1 = b(0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff);
+    assert.equal(typeof msgpack.unpack(i64neg1), 'number');
+    assert.equal(msgpack.unpack(i64neg1), -1);
+    const i64safe = b(0xd3, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01);
+    assert.equal(typeof msgpack.unpack(i64safe), 'number');
+    assert.equal(msgpack.unpack(i64safe), -Number.MAX_SAFE_INTEGER);
     assert.equal(
-      msgpack.unpack(b(0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff)),
-      -1
+      msgpack.unpack(b(0xd3, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)),
+      -(2n ** 63n)
     );
   });
 
@@ -341,15 +355,20 @@ describe('pack type dispatch', () => {
   it('packs integers across the signed and unsigned edges', () => {
     const cases = [
       0, 1, -1, 127, -32, 255, -128, 65535, -32768,
-      4294967295, -2147483648, 2 ** 53, -(2 ** 53),
+      4294967295, -2147483648,
       Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER,
     ];
     for (const n of cases) {
-      assert.equal(msgpack.unpack(msgpack.pack(n)), n, String(n));
+      const got = msgpack.unpack(msgpack.pack(n));
+      assert.equal(typeof got, 'number', String(n));
+      assert.equal(got, n, String(n));
     }
-    /* 2^63 and -2^63 still take the integer path (they fit uint64/int64). */
-    assert.equal(msgpack.unpack(msgpack.pack(2 ** 63)), 2 ** 63);
-    assert.equal(msgpack.unpack(msgpack.pack(-(2 ** 63))), -(2 ** 63));
+    /* 2^53, 2^63 and -2^63 take the integer path (they fit uint64/int64)
+     * but unpack as BigInt because they sit outside MAX_SAFE_INTEGER. */
+    assert.equal(msgpack.unpack(msgpack.pack(2 ** 53)), 2n ** 53n);
+    assert.equal(msgpack.unpack(msgpack.pack(-(2 ** 53))), -(2n ** 53n));
+    assert.equal(msgpack.unpack(msgpack.pack(2 ** 63)), 2n ** 63n);
+    assert.equal(msgpack.unpack(msgpack.pack(-(2 ** 63))), -(2n ** 63n));
     /* One ulp below 2^64 is the largest double that survives the uint64
      * cast; the next one up must fall through to the double path. */
     assert.equal(msgpack.pack(2 ** 64 - 2048)[0], 0xcf);
@@ -363,9 +382,8 @@ describe('pack type dispatch', () => {
     assert.equal(msgpack.unpack(msgpack.pack(false)), false);
   });
 
-  it('refuses to pack a Symbol or a BigInt', () => {
+  it('refuses to pack a Symbol', () => {
     assert.throws(() => msgpack.pack(Symbol('x')), /cannot pack object/);
-    assert.throws(() => msgpack.pack(10n), /cannot pack object/);
   });
 
   it('refuses to pack a function', () => {

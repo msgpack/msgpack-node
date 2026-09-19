@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-19
+
+Integers whose magnitude is greater than `Number.MAX_SAFE_INTEGER` unpack as
+`bigint` instead of a rounded `number`. Values that fit stay `number`
+regardless of wire width. `pack()` accepts `bigint` in the signed/unsigned
+64-bit range.
+
+### Added
+
+- `pack()` encodes `bigint` via `v8::BigInt` `Int64Value` / `Uint64Value` as
+  the smallest MessagePack integer family that fits.
+- Unpack of uint64/int64 values outside `Number.MAX_SAFE_INTEGER` returns
+  `bigint` so 64-bit integers stay exact (`#37`).
+
+### Changed
+
+- A uint64 of `1` still unpacks as Number `1`. `Number.MAX_SAFE_INTEGER`
+  stays Number even when the wire type is uint64.
+- A JS `number` that is already rounded (for example `18446464814936021000`)
+  still packs on the Number path; lost bits are not recovered.
+
+### Breaking
+
+- Unpacking a 64-bit integer larger than `Number.MAX_SAFE_INTEGER` now
+  returns `bigint` instead of the nearest double. Code that assumed
+  `typeof unpack(...) === 'number'` for every integer must accept `bigint`.
+- `pack(10n)` no longer throws `cannot pack object`. BigInt outside
+  uint64/int64 (`2n ** 64n`, `-(2n ** 63n) - 1n`) throws
+  `cannot pack BigInt outside 64-bit range`.
+
 ## [2.0.0] - 2026-09-18
 
 Security modernization. Requires **Node.js 18+**. Vendors **msgpack-c c-7.0.2**.
@@ -58,5 +88,6 @@ GitHub Actions tests Node 18/20/22 on Ubuntu, macOS, and Windows 2022.
 - Pack throw paths free or return pooled sbuffers on every exit.
 - msgpack-c c-7.0.2 includes unpacker buffer-expansion overflow checks.
 
-[Unreleased]: https://github.com/msgpack/msgpack-node/compare/e04c9b55f98d64512174d6e859b8294b729659a2...HEAD
+[Unreleased]: https://github.com/msgpack/msgpack-node/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/msgpack/msgpack-node/compare/e04c9b55f98d64512174d6e859b8294b729659a2...HEAD
 [2.0.0]: https://github.com/msgpack/msgpack-node/commit/e04c9b55f98d64512174d6e859b8294b729659a2
