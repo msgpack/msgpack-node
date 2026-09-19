@@ -187,4 +187,23 @@ describe('unpack({ lazy: true })', () => {
     assert.equal(99 in o, false);
     assert.equal(1 in o, true);
   });
+
+  it('still reads str and bin after the caller Buffer is transferred', () => {
+    const packed = msgpack.pack({
+      s: 'hello-lazy-uaf-marker-ABCDEFGH',
+      t: 'second-string-XXXXYYYY',
+      n: 7,
+      b: Buffer.from('bin-payload-1234')
+    });
+    const buf = Buffer.allocUnsafeSlow(packed.length);
+    packed.copy(buf);
+    const o = msgpack.unpack(buf, { lazy: true });
+    structuredClone(buf.buffer, { transfer: [buf.buffer] });
+    assert.equal(buf.buffer.byteLength, 0);
+    assert.equal(o.n, 7);
+    assert.equal(o.s, 'hello-lazy-uaf-marker-ABCDEFGH');
+    assert.equal(o.t, 'second-string-XXXXYYYY');
+    assert.equal(Buffer.isBuffer(o.b), true);
+    assert.equal(o.b.toString(), 'bin-payload-1234');
+  });
 });

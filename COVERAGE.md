@@ -150,9 +150,10 @@ gcovr --root . --filter src/ --exclude deps/ --no-markers --txt-metric branch --
   identity, nested `o.c[1]` without reading siblings, `__proto__` /
   `constructor` as own properties, oversized headers still throw, incomplete
   buffers still return `null`, `toJSON` / `JSON.stringify` / `util.inspect`
-  match eager unpack, nested BigInt, non-object second args, and toJSON
-  `this` checks. Lazy OOM / empty-Maybe / ObjectTemplate-failure arms are
-  marked `GCOVR_EXCL_*`, not deleted.
+  match eager unpack, nested BigInt, non-object second args, toJSON
+  `this` checks, and str/bin reads after the caller Buffer is transferred.
+  Lazy OOM / empty-Maybe / ObjectTemplate-failure / CopyBuffer-failure arms
+  are marked `GCOVR_EXCL_*`, not deleted.
 - `test/cli.test.js` (12 tests) — the exit-1 paths of both CLIs: invalid JSON,
   empty stdin, a pack rejection reachable from real JSON, an unparseable byte,
   an oversized header, incomplete input both alone and after a good frame, and

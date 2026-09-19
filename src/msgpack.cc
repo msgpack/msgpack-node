@@ -678,10 +678,13 @@ static v8::Local<v8::Value> MsgpackToJs(const msgpack_object* mo) {
 }
 
 /*
- * Lazy unpack: keep the msgpack zone (and the source Buffer) alive, and wrap
- * maps/arrays as JS objects whose values are accessors. Nested containers are
- * not converted until a property is read. toJSON / inspect.custom materialize
- * through MsgpackToJs so JSON.stringify and util.inspect match eager unpack.
+ * Lazy unpack: keep the msgpack zone (and a session-owned copy of the source
+ * bytes) alive, and wrap maps/arrays as JS objects whose values are accessors.
+ * Nested containers are not converted until a property is read. toJSON /
+ * inspect.custom materialize through MsgpackToJs so JSON.stringify and
+ * util.inspect match eager unpack. The copy is required because msgpack-c
+ * aliases str/bin into the input; a Persistent on the caller's Buffer does
+ * not survive ArrayBuffer transfer.
  */
 class LazySession : public Nan::ObjectWrap {
  public:
@@ -1073,6 +1076,26 @@ NAN_METHOD(Unpack) {
   }
   if (scan == kScanParse) {
     return Nan::ThrowError("Encountered error unpacking buffer");
+  }
+
+  /* Copy before unpack_next so via.str/via.bin alias session-owned bytes.
+   * Nan::Persistent on the caller's Buffer does not keep the backing store
+   * through structuredClone / postMessage transfer (CWE-416). */
+  if (UnpackLazyRequested(info)) {
+    /* GCOVR_EXCL_BR_START: node Buffers are smaller than UINT32_MAX. */
+    if (len > static_cast<size_t>(UINT32_MAX)) {
+      return Nan::ThrowError("Error copying buffer");
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    Nan::MaybeLocal<v8::Object> copied =
+        Nan::CopyBuffer(data, static_cast<uint32_t>(len));
+    /* GCOVR_EXCL_BR_START: CopyBuffer fails only when V8 is out of memory. */
+    if (copied.IsEmpty()) {
+      return Nan::ThrowError("Error copying buffer");
+    }
+    /* GCOVR_EXCL_BR_STOP */
+    buf = copied.ToLocalChecked();
+    data = node::Buffer::Data(buf);
   }
 
   msgpack_unpacked result;

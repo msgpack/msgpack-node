@@ -23,6 +23,9 @@ as accessors so nested values are not converted until they are read. See `#40`.
   lazy value also round-trips because it calls `toJSON`.
 - Primitives, incomplete buffers, trailing `bytes_remaining`, and the DoS
   limits are unchanged. `__proto__` / `constructor` stay own properties.
+- Lazy unpack copies the input before decode so str/bin do not alias the
+  caller's Buffer. Transferring that Buffer after unpack cannot dangle
+  later property reads.
 
 ## [3.1.0] - 2026-09-19
 

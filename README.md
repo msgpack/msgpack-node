@@ -83,12 +83,13 @@ successful (or attempted) unpack. Stream uses that to splice leftover data.
 `unpack(buf, { lazy: true })` wraps maps as objects with accessor
 own-properties and arrays as array-likes with indexed accessors. Nested
 values are not converted until they are read, which is useful for large
-payloads when only a few keys are needed. `JSON.stringify` and
-`util.inspect` materialize via `toJSON` / `inspect.custom`. Lazy arrays are
-not real `Array`s (`Array.isArray` is false); `pack()` still round-trips
-them because it calls `toJSON`. Primitives unpack eagerly even when `lazy`
-is set. `__proto__` and `constructor` keys stay own properties, same as
-eager unpack.
+payloads when only a few keys are needed. The decoder copies `buf` so later
+reads do not depend on the caller's backing store (transfer / detach is
+safe). `JSON.stringify` and `util.inspect` materialize via `toJSON` /
+`inspect.custom`. Lazy arrays are not real `Array`s (`Array.isArray` is
+false); `pack()` still round-trips them because it calls `toJSON`.
+Primitives unpack eagerly even when `lazy` is set. `__proto__` and
+`constructor` keys stay own properties, same as eager unpack.
 
 ### Pack type hints (3.1)
 
