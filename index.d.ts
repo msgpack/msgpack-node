@@ -46,7 +46,8 @@ export interface PackOptions {
  * Serialize values to MessagePack.
  *
  * A single argument is packed as itself; two or more are packed as an array
- * of that many elements.
+ * of that many elements. Arrays and maps whose length exceeds 1,000,000
+ * throw `msgpack pack limit exceeded`.
  *
  * When the second argument own-enumerates only `type`, `family`, and/or
  * `interpret`, it is pack options rather than a second value. `type` forces
@@ -97,13 +98,29 @@ export namespace unpack {
 }
 
 /**
+ * Cap on `Stream` receive concatenation (32 MiB plus 16 bytes of framing).
+ * A chunk that would take `buf.length + chunk.length` past this is rejected
+ * before allocate.
+ */
+export const MAX_STREAM_BYTES: number;
+
+/**
+ * Cap on CLI stdin accumulation in `json2msgpack` / `msgpack2json` (32 MiB).
+ * Overflow exits 1 before concat/parse.
+ */
+export const MAX_STDIN_BYTES: number;
+
+/**
  * Frames MessagePack messages over a stream.
  *
  * Emits `'msg'` with each decoded value, `'drain'` when the underlying
  * writable is ready for more data and the send queue is empty, and
- * `'error'` if a packet cannot be decoded (the buffered data is then
- * dropped) or if queued sends are discarded because the underlying stream
- * emitted `error`/`close`/`end`.
+ * `'error'` if a packet cannot be decoded, if the receive buffer would
+ * exceed `MAX_STREAM_BYTES` (the buffered data is then dropped; the
+ * underlying stream is destroyed when possible), if queued sends are
+ * discarded because the underlying stream emitted `error`/`close`/`end`,
+ * or if the underlying stream errors. `buf` is also dropped on the
+ * underlying stream's `close` / `end` / `error`.
  */
 export class Stream extends EventEmitter {
     constructor(s: NodeJS.ReadWriteStream);

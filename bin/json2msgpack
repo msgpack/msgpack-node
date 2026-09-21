@@ -5,9 +5,18 @@
 
 const msgpack = require('../lib/msgpack');
 
+const MAX_STDIN_BYTES = msgpack.MAX_STDIN_BYTES;
 const chunks = [];
+let n = 0;
 
-process.stdin.on('data', (d) => chunks.push(d));
+process.stdin.on('data', (d) => {
+    n += d.length;
+    if (n > MAX_STDIN_BYTES) {
+        console.error('json2msgpack: stdin exceeds MAX_STDIN_BYTES (' + MAX_STDIN_BYTES + ')');
+        process.exit(1);
+    }
+    chunks.push(d);
+});
 
 process.stdin.on('end', () => {
     const text = Buffer.concat(chunks).toString('utf8');

@@ -68,6 +68,13 @@ describe('json2msgpack error paths', () => {
       assert.equal(msgpack.unpack(r.stdout), want, text);
     }
   });
+
+  it('exits 1 before concat when stdin exceeds MAX_STDIN_BYTES', { timeout: 30000 }, () => {
+    const r = run('json2msgpack', Buffer.alloc(msgpack.MAX_STDIN_BYTES + 1));
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /json2msgpack: stdin exceeds MAX_STDIN_BYTES/);
+    assert.equal(r.stdout.length, 0);
+  });
 });
 
 describe('msgpack2json error paths', () => {
@@ -120,5 +127,12 @@ describe('msgpack2json error paths', () => {
     const r = run('msgpack2json', msgpack.pack(value));
     assert.equal(r.status, 0);
     assert.deepEqual(JSON.parse(r.stdout.toString('utf8')), value);
+  });
+
+  it('exits 1 before concat when stdin exceeds MAX_STDIN_BYTES', { timeout: 30000 }, () => {
+    const r = run('msgpack2json', Buffer.alloc(msgpack.MAX_STDIN_BYTES + 1));
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /msgpack2json: stdin exceeds MAX_STDIN_BYTES/);
+    assert.equal(r.stdout.length, 0);
   });
 });

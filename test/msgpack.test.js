@@ -324,7 +324,7 @@ describe('msgpack.Stream', () => {
     assert.equal(s.writes.length, 1);
   });
 
-  it('does not emit error on close when the queue is empty', () => {
+  it('does not emit error on close or end when the queue is empty', () => {
     const s = mockWritable([true]);
     const ms = new msgpack.Stream(s);
     const errors = [];
@@ -332,8 +332,13 @@ describe('msgpack.Stream', () => {
     ms.send('one');
     s.emit('close');
     s.emit('end');
-    s.emit('error', new Error('socket'));
     assert.equal(errors.length, 0);
+    const sockErr = new Error('socket');
+    s.emit('error', sockErr);
+    /* An 'error' listener on the socket counts as handled in Node, so the
+     * original socket error must still reach Stream. */
+    assert.equal(errors.length, 1);
+    assert.strictEqual(errors[0], sockErr);
   });
 
   it('drops the queue on underlying error and end', () => {
@@ -343,8 +348,12 @@ describe('msgpack.Stream', () => {
     ms.on('error', (e) => errors.push(e));
     ms.send('a');
     ms.send('b');
-    s.emit('error', new Error('socket'));
-    assert.equal(errors.length, 1);
+    const sockErr = new Error('socket');
+    s.emit('error', sockErr);
+    /* Queue-drop error first, then the original socket error once. */
+    assert.equal(errors.length, 2);
+    assert.match(errors[0].message, /unsent|backpressure/);
+    assert.strictEqual(errors[1], sockErr);
 
     const s2 = mockWritable([false]);
     const ms2 = new msgpack.Stream(s2);
@@ -486,6 +495,78 @@ describe('msgpack.Stream', () => {
     s.emit('data', Buffer.concat([msgpack.pack('two'), msgpack.pack('three')]));
 
     assert.deepEqual(seen, ['one', 'two', 'three']);
+  });
+
+  function hugeChunk(n) {
+    return {
+      length: n,
+      copy() {
+        throw new Error('copy should not run');
+      },
+    };
+  }
+
+  it('rejects a receive concat that would exceed MAX_STREAM_BYTES before allocate', () => {
+    const s = new EventEmitter();
+    let destroyed = 0;
+    /* Node's stream.destroy(err) emits 'error' on the socket. */
+    s.destroy = function (err) {
+      destroyed += 1;
+      if (err) s.emit('error', err);
+    };
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.addListener('error', (e) => errors.push(e));
+    const packed = msgpack.pack('hello');
+    s.emit('data', packed.subarray(0, packed.length - 1));
+    assert.ok(ms.buf);
+    s.emit('data', hugeChunk(msgpack.MAX_STREAM_BYTES));
+    assert.equal(ms.buf, null);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /stream limit exceeded/);
+    assert.equal(destroyed, 1);
+    /* Further data is ignored after the cap fires. */
+    s.emit('data', msgpack.pack('ok'));
+    assert.equal(errors.length, 1);
+  });
+
+  it('rejects a first chunk longer than MAX_STREAM_BYTES', () => {
+    const s = new EventEmitter();
+    let destroyed = 0;
+    s.destroy = function (err) {
+      destroyed += 1;
+      if (err) s.emit('error', err);
+    };
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.addListener('error', (e) => errors.push(e));
+    s.emit('data', hugeChunk(msgpack.MAX_STREAM_BYTES + 1));
+    assert.equal(ms.buf, null);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /stream limit exceeded/);
+    assert.equal(destroyed, 1);
+  });
+
+  it('drops buf on close, end, and error of the underlying stream', () => {
+    const packed = msgpack.pack('hello');
+    for (const ev of ['close', 'end', 'error']) {
+      const s = new EventEmitter();
+      const ms = new msgpack.Stream(s);
+      const errors = [];
+      ms.addListener('error', (e) => errors.push(e));
+      s.emit('data', packed.subarray(0, packed.length - 1));
+      assert.ok(ms.buf, ev);
+      if (ev === 'error') {
+        const sockErr = new Error('socket down');
+        s.emit('error', sockErr);
+        assert.equal(errors.length, 1, ev);
+        assert.strictEqual(errors[0], sockErr, ev);
+      } else {
+        s.emit(ev);
+        assert.equal(errors.length, 0, ev);
+      }
+      assert.equal(ms.buf, null, ev);
+    }
   });
 
   it('round-trips over a TCP socket', (t, done) => {
