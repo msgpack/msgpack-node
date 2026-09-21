@@ -2,7 +2,7 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 2.0 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, and
+Version 2.0 requires **Node.js 22+**, vendors **msgpack-c c-7.0.2**, and
 rejects oversized unpack headers instead of allocating them. See
 [`SECURITY.md`](SECURITY.md).
 
@@ -25,7 +25,9 @@ the buffer is a truncated (incomplete) MessagePack object. Oversized
 array/map/string bombs throw.
 
 A streaming helper wraps a readable socket and emits `msg`, plus `error` when
-a packet cannot be unpacked (the offending buffer is dropped):
+a packet cannot be unpacked or the receive buffer would exceed
+`MAX_STREAM_BYTES` (the offending buffer is dropped, and the socket is
+destroyed when possible):
 
 ```javascript
 const msgpack = require('msgpack');
@@ -71,26 +73,31 @@ successful (or attempted) unpack. Stream uses that to splice leftover data.
 
 ### Limits
 
-* array/map length ≤ 1,000,000
+* array/map length ≤ 1,000,000 on both pack and unpack
 * str/bin/ext length ≤ 32 MiB
 * nesting depth ≤ 512 on both pack and unpack
+* Stream receive buffer ≤ `MAX_STREAM_BYTES` (32 MiB + 16 bytes of framing)
+* CLI stdin ≤ `MAX_STDIN_BYTES` (32 MiB) before concat/parse
 
 The payload `dd ff 00 00 00` throws `msgpack unpack limit exceeded`. Packing a
-value nested deeper than 512 throws `Cowardly refusing to pack object nested
-more than 512 levels deep` instead of overflowing the C stack.
+sparse array or map whose length exceeds 1,000,000 throws
+`msgpack pack limit exceeded`. Packing a value nested deeper than 512 throws
+`Cowardly refusing to pack object nested more than 512 levels deep` instead of
+overflowing the C stack. Incomplete Stream frames that would grow past
+`MAX_STREAM_BYTES` throw `msgpack stream limit exceeded` before allocate.
 
 ### Building, installation, testing
 
 ```
-npm install
+npm ci
 npm test
 npm run coverage
 ```
 
-Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 18/20/22
-on Ubuntu and macOS. `npm run coverage` instruments JavaScript with c8 and the
-native addon with gcov, and fails under 95%. Gates and remaining uncovered
-lines are documented in [`COVERAGE.md`](COVERAGE.md).
+Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 22/24
+on Ubuntu, macOS, and windows-2022. `npm run coverage` instruments JavaScript
+with c8 and the native addon with gcov, and fails under 95%. Gates and remaining
+uncovered lines are documented in [`COVERAGE.md`](COVERAGE.md).
 
 ### Command Line Utilities
 
@@ -126,7 +133,8 @@ echo '{"hello":"world"}' | bin/json2msgpack | bin/msgpack2json
 ```
 
 `msgpack2json` prints one JSON value per line and consumes every complete
-message in its input. Both exit non-zero on invalid or truncated input.
+message in its input. Both exit non-zero on invalid or truncated input, and
+both refuse stdin larger than `MAX_STDIN_BYTES` (32 MiB).
 
 ### Benchmarks
 

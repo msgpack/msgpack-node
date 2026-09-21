@@ -269,6 +269,65 @@ describe('msgpack.Stream', () => {
     assert.deepEqual(seen, ['one', 'two', 'three']);
   });
 
+  function hugeChunk(n) {
+    return {
+      length: n,
+      copy() {
+        throw new Error('copy should not run');
+      },
+    };
+  }
+
+  it('rejects a receive concat that would exceed MAX_STREAM_BYTES before allocate', () => {
+    const s = new EventEmitter();
+    let destroyed = 0;
+    s.destroy = function () { destroyed += 1; };
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.addListener('error', (e) => errors.push(e));
+    const packed = msgpack.pack('hello');
+    s.emit('data', packed.subarray(0, packed.length - 1));
+    assert.ok(ms.buf);
+    s.emit('data', hugeChunk(msgpack.MAX_STREAM_BYTES));
+    assert.equal(ms.buf, null);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /stream limit exceeded/);
+    assert.equal(destroyed, 1);
+    /* Further data is ignored after the cap fires. */
+    s.emit('data', msgpack.pack('ok'));
+    assert.equal(errors.length, 1);
+  });
+
+  it('rejects a first chunk longer than MAX_STREAM_BYTES', () => {
+    const s = new EventEmitter();
+    let destroyed = 0;
+    s.destroy = function () { destroyed += 1; };
+    const ms = new msgpack.Stream(s);
+    const errors = [];
+    ms.addListener('error', (e) => errors.push(e));
+    s.emit('data', hugeChunk(msgpack.MAX_STREAM_BYTES + 1));
+    assert.equal(ms.buf, null);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0].message, /stream limit exceeded/);
+    assert.equal(destroyed, 1);
+  });
+
+  it('drops buf on close, end, and error of the underlying stream', () => {
+    const packed = msgpack.pack('hello');
+    for (const ev of ['close', 'end', 'error']) {
+      const s = new EventEmitter();
+      const ms = new msgpack.Stream(s);
+      s.emit('data', packed.subarray(0, packed.length - 1));
+      assert.ok(ms.buf, ev);
+      if (ev === 'error') {
+        s.emit('error', new Error('socket down'));
+      } else {
+        s.emit(ev);
+      }
+      assert.equal(ms.buf, null, ev);
+    }
+  });
+
   it('round-trips over a TCP socket', (t, done) => {
     const server = net.createServer((c) => {
       c.write(msgpack.pack('hello '));
