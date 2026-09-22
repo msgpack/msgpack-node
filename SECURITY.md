@@ -1,4 +1,4 @@
-# Security notes (node-msgpack 2.0.0)
+# Security notes (node-msgpack 3.4.0)
 
 This package vendors [msgpack-c](https://github.com/msgpack/msgpack-c) **c-7.0.2**
 (`e17beb371b59459a13b48e166a11e123bda5bf93`), the C library.
@@ -49,6 +49,43 @@ process died with SIGSEGV.
 on circular refs / unencodable values without freeing it. The sbuffer is now
 owned by an RAII guard that returns pooled buffers or `msgpack_sbuffer_free`s
 on every exit path, including C++ exceptions.
+
+## Stream receive buffer
+
+`msgpack.Stream` concatenates incomplete frames into `self.buf`. Before any
+allocate, a new chunk is rejected when `self.buf.length + chunk.length` would
+exceed `MAX_STREAM_BYTES` (32 MiB plus 16 bytes of MessagePack framing). The
+buffer is dropped, `'error'` is emitted (`msgpack stream limit exceeded`),
+and the underlying stream is `destroy()`ed when that method exists. `close`,
+`end`, and `error` on the underlying stream also drop `self.buf`.
+
+## CLI stdin
+
+`bin/json2msgpack` and `bin/msgpack2json` refuse stdin larger than
+`MAX_STDIN_BYTES` (32 MiB) before `Buffer.concat` / `JSON.parse` /
+`unpack`. They exit 1 with `stdin exceeds MAX_STDIN_BYTES`.
+
+## Pack container size
+
+`pack()` rejects arrays and maps whose own length exceeds 1,000,000
+(`kMaxContainer`), the same policy as unpack. Sparse `Array.length` above
+that cap throws `msgpack pack limit exceeded` without walking the holes.
+
+## Dependency bump window
+
+The pins below are inventory, not a calendar SLA:
+
+- msgpack-c **c-7.0.2** (`e17beb371b59459a13b48e166a11e123bda5bf93`)
+- NAN **2.28.0** (compile-in; exact in `package.json` / shrinkwrap)
+
+Risk-based window:
+
+- **Critical or high** native advisories in vendored msgpack-c or in
+  compile-in NAN: bump to a reviewed fix, or document why the pin stays,
+  within **14 days** of that fix being available.
+- **Medium**: next minor of this package.
+- **Low / no advisory**: no scheduled bump. The inventory pin is not a
+  commitment to track upstream on a calendar.
 
 ## License
 

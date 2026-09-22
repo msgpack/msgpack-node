@@ -591,7 +591,13 @@ static void PackArray(msgpack_packer* pk, v8::Local<v8::Array> arr, int depth) {
     throw MsgpackException(Error("Cowardly refusing to pack circular reference"));
   }
   Mark(arr);
+  /* Snapshot Length() once and freeze it for the walk so a growing getter
+   * cannot extend the loop. Same 1e6 policy as ScanOne. */
   uint32_t len = arr->Length();
+  if (len > kMaxContainer) {
+    Unmark(arr);
+    throw MsgpackException(Error("msgpack pack limit exceeded"));
+  }
   /* GCOVR_EXCL_BR_START: msgpack_sbuffer_write only fails on realloc
    * failure, which no JS-reachable input can force. */
   if (msgpack_pack_array(pk, len)) {
@@ -646,6 +652,10 @@ static void PackObject(msgpack_packer* pk, v8::Local<v8::Object> obj, int depth)
     throw;
   }
   uint32_t len = names->Length();
+  if (len > kMaxContainer) {
+    Unmark(obj);
+    throw MsgpackException(Error("msgpack pack limit exceeded"));
+  }
   /* GCOVR_EXCL_BR_START: allocation failure only, as in PackArray. */
   if (msgpack_pack_map(pk, len)) {
     Unmark(obj);

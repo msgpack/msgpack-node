@@ -2,7 +2,7 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 3.3 requires **Node.js 18+**, vendors **msgpack-c c-7.0.2**, unpacks
+Version 3.4 requires **Node.js 22.x**, vendors **msgpack-c c-7.0.2**, unpacks
 64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`, accepts
 optional pack type/family hints, can unpack maps and arrays lazily
 (`unpack(buf, { lazy: true })`), and applies write backpressure on
@@ -27,7 +27,9 @@ and returns a JavaScript value, or `null` if the buffer is a truncated
 (incomplete) MessagePack object. Oversized array/map/string bombs throw.
 
 A streaming helper wraps a readable socket and emits `msg`, plus `error` when
-a packet cannot be unpacked (the offending buffer is dropped). `send()` packs
+a packet cannot be unpacked, the receive buffer would exceed
+`MAX_STREAM_BYTES` (the offending buffer is dropped, and the socket is
+destroyed when possible), or the underlying stream errors. `send()` packs
 and writes; it returns the boolean from the underlying `write()`, or `false`
 if the message was queued because a previous write returned `false` and
 `drain` has not fired yet. `drain` is re-emitted from the underlying
@@ -147,26 +149,33 @@ Default packing is unchanged when no recognized options object is passed.
 
 ### Limits
 
-* array/map length ≤ 1,000,000
+* array/map length ≤ 1,000,000 on both pack and unpack
 * str/bin/ext length ≤ 32 MiB
 * nesting depth ≤ 512 on both pack and unpack
+* Stream receive buffer ≤ `MAX_STREAM_BYTES` (32 MiB + 16 bytes of framing)
+* CLI stdin ≤ `MAX_STDIN_BYTES` (32 MiB) before concat/parse
 
 The payload `dd ff 00 00 00` throws `msgpack unpack limit exceeded`. Packing a
-value nested deeper than 512 throws `Cowardly refusing to pack object nested
-more than 512 levels deep` instead of overflowing the C stack.
+sparse array or map whose length exceeds 1,000,000 throws
+`msgpack pack limit exceeded`. Packing a value nested deeper than 512 throws
+`Cowardly refusing to pack object nested more than 512 levels deep` instead of
+overflowing the C stack. Incomplete Stream frames that would grow past
+`MAX_STREAM_BYTES` throw `msgpack stream limit exceeded` before allocate.
 
 ### Building, installation, testing
 
 ```
-npm install
+npm ci
 npm test
 npm run coverage
 ```
 
-Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 18/20/22
-on Ubuntu and macOS. `npm run coverage` instruments JavaScript with c8 and the
-native addon with gcov, and fails under 95%. Gates and remaining uncovered
-lines are documented in [`COVERAGE.md`](COVERAGE.md).
+Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 22
+on Ubuntu, macOS, and windows-2022. Node 24 is not advertised: lazy unpack
+still uses `SetIndexedPropertyHandler`, which Node 24 V8 removed.
+`npm run coverage` instruments JavaScript with c8 and the native addon with
+gcov, and fails under 95%. Gates and remaining uncovered lines are
+documented in [`COVERAGE.md`](COVERAGE.md).
 
 ### Command Line Utilities
 
@@ -202,7 +211,8 @@ echo '{"hello":"world"}' | bin/json2msgpack | bin/msgpack2json
 ```
 
 `msgpack2json` prints one JSON value per line and consumes every complete
-message in its input. Both exit non-zero on invalid or truncated input.
+message in its input. Both exit non-zero on invalid or truncated input, and
+both refuse stdin larger than `MAX_STDIN_BYTES` (32 MiB).
 
 ### Benchmarks
 

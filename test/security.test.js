@@ -43,6 +43,29 @@ describe('unpack DoS limits', () => {
   });
 });
 
+describe('pack container limits', () => {
+  it('rejects a sparse array whose Length exceeds 1e6', () => {
+    const a = [];
+    a.length = 1000001;
+    assert.throws(() => msgpack.pack(a), /pack limit exceeded/);
+  });
+
+  it('rejects a sparse array over 1e6 with a no-op interpret', () => {
+    const a = [];
+    a.length = 1000001;
+    assert.throws(
+      () => msgpack.pack(a, { interpret: () => ({ data: 0 }) }),
+      /pack limit exceeded/,
+    );
+  });
+
+  it('rejects a map with more than 1e6 own keys', { timeout: 60000 }, () => {
+    const o = Object.create(null);
+    for (let i = 0; i <= 1000000; i++) o[i] = 0;
+    assert.throws(() => msgpack.pack(o), /pack limit exceeded/);
+  });
+});
+
 describe('pack throw paths do not leak (msgpack/msgpack-node#25686)', () => {
   it('survives many pack failures without crashing', () => {
     for (let i = 0; i < 20000; i++) {
