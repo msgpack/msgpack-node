@@ -582,13 +582,20 @@ static void PackArrayInterpreted(msgpack_packer* pk, v8::Local<v8::Array> arr,
     throw MsgpackException(Error("Cowardly refusing to pack circular reference"));
   }  /* GCOVR_EXCL_STOP */
   Mark(arr);
+  /* Snapshot Length() once and freeze it for the walk so a growing getter
+   * cannot extend the loop. Same 1e6 policy as PackArray. */
+  uint32_t len = arr->Length();
+  if (len > kMaxContainer) {
+    Unmark(arr);
+    throw MsgpackException(Error("msgpack pack limit exceeded"));
+  }
   try {
     /* GCOVR_EXCL_BR_START: allocation failure only. */
-    if (msgpack_pack_array(pk, arr->Length())) {
+    if (msgpack_pack_array(pk, len)) {
       throw MsgpackException(Error("Error serializing object"));
     }
     /* GCOVR_EXCL_BR_STOP */
-    for (uint32_t i = 0; i < arr->Length(); i++) {
+    for (uint32_t i = 0; i < len; i++) {
       v8::Local<v8::Value> item = CheckedGet(arr, i);
       /* interpret always sets recv in FillHintFromObject. */
       v8::Local<v8::Object> recv = hint.recv;
