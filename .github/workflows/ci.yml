@@ -11,10 +11,10 @@ jobs:
       fail-fast: false
       matrix:
         # windows-2022 ships VS 2022. windows-latest currently has VS 2026
-        # (18.x), which node-gyp 10/11 bundled with Node 22/24 reports as
+        # (18.x), which node-gyp 10/11 bundled with Node 22 reports as
         # unknown version "undefined" and then fails the native rebuild.
         os: [ubuntu-latest, macos-latest, windows-2022]
-        node: [22, 24]
+        node: [22]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

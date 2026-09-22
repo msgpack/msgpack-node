@@ -2,7 +2,7 @@
 and de-serializes JavaScript values with [MessagePack](https://msgpack.org).
 Packed output is a `Buffer` and is typically much smaller than JSON.
 
-Version 3.4 requires **Node.js 22+**, vendors **msgpack-c c-7.0.2**, unpacks
+Version 3.4 requires **Node.js 22.x**, vendors **msgpack-c c-7.0.2**, unpacks
 64-bit integers outside `Number.MAX_SAFE_INTEGER` as `bigint`, accepts
 optional pack type/family hints, can unpack maps and arrays lazily
 (`unpack(buf, { lazy: true })`), and applies write backpressure on
@@ -170,10 +170,12 @@ npm test
 npm run coverage
 ```
 
-Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 22/24
-on Ubuntu, macOS, and windows-2022. `npm run coverage` instruments JavaScript
-with c8 and the native addon with gcov, and fails under 95%. Gates and remaining
-uncovered lines are documented in [`COVERAGE.md`](COVERAGE.md).
+Needs a C/C++ toolchain and Python (node-gyp). GitHub Actions runs Node 22
+on Ubuntu, macOS, and windows-2022. Node 24 is not advertised: lazy unpack
+still uses `SetIndexedPropertyHandler`, which Node 24 V8 removed.
+`npm run coverage` instruments JavaScript with c8 and the native addon with
+gcov, and fails under 95%. Gates and remaining uncovered lines are
+documented in [`COVERAGE.md`](COVERAGE.md).
 
 ### Command Line Utilities
 

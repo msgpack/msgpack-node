@@ -28,7 +28,7 @@
     "lib": "lib"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22"
   },
   "dependencies": {
     "nan": "2.28.0"
