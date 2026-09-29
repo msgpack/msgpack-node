@@ -76,7 +76,7 @@ that cap throws `msgpack pack limit exceeded` without walking the holes.
 The pins below are inventory, not a calendar SLA:
 
 - msgpack-c **c-7.0.2** (`e17beb371b59459a13b48e166a11e123bda5bf93`)
-- NAN **2.28.0** (compile-in; exact in `package.json` / shrinkwrap)
+- NAN **2.28.0** (compile-in; exact in `package.json` + `package-lock.json`)
 
 Risk-based window:
 
